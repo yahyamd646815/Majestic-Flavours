@@ -1,0 +1,110 @@
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
+@import "tailwindcss/utilities.css";
+
+@import "nativewind/theme";
+
+/* ---------------------------------------------------------------- */
+/* Majestic Flavors design tokens                                    */
+/* ---------------------------------------------------------------- */
+@theme {
+  /* Brand colors */
+  --color-gold: #c8a44a;
+  --color-maroon: #7b1515;
+  --color-dark-green: #1b3a2d;
+  --color-cream: #f8edd5;
+
+  /* Text */
+  --color-text-primary: #1a1a1a;
+  --color-text-secondary: #6b6b6b;
+
+  /* Border */
+  --color-border: #e8e0d0;
+
+  /* Stock status — do not change */
+  --color-in-stock: #16a34a;
+  --color-low-stock: #d97706;
+  --color-out-of-stock: #dc2626;
+
+  /* Fonts */
+  --font-inter: "Inter-Regular";
+  --font-inter-medium: "Inter-Medium";
+  --font-inter-semibold: "Inter-SemiBold";
+  --font-inter-bold: "Inter-Bold";
+}
+
+/* ---------------------------------------------------------------- */
+/* Reusable component utilities                                      */
+/* ---------------------------------------------------------------- */
+
+@utility card {
+  @apply rounded-xl bg-white p-4 shadow-sm;
+}
+
+@utility section-header {
+  @apply bg-maroon px-4 py-3;
+}
+
+@utility section-header__title {
+  @apply font-inter-semibold text-base text-white;
+}
+
+@utility badge-gold {
+  @apply rounded-full bg-gold px-3 py-1;
+}
+
+@utility badge-gold__text {
+  @apply font-inter-semibold text-xs text-text-primary;
+}
+
+@utility badge-maroon {
+  @apply rounded-full bg-maroon px-3 py-1;
+}
+
+@utility badge-maroon__text {
+  @apply font-inter-semibold text-xs text-white;
+}
+
+@utility status-badge {
+  @apply rounded-full px-3 py-1;
+}
+
+@utility status-badge--in-stock {
+  @apply bg-in-stock/10;
+}
+
+@utility status-badge--low-stock {
+  @apply bg-low-stock/10;
+}
+
+@utility status-badge--out-of-stock {
+  @apply bg-out-of-stock/10;
+}
+
+@utility status-badge__text--in-stock {
+  @apply font-inter-semibold text-xs text-in-stock;
+}
+
+@utility status-badge__text--low-stock {
+  @apply font-inter-semibold text-xs text-low-stock;
+}
+
+@utility status-badge__text--out-of-stock {
+  @apply font-inter-semibold text-xs text-out-of-stock;
+}
+
+@utility btn-primary {
+  @apply w-full items-center rounded-lg bg-gold px-4 py-3;
+}
+
+@utility btn-primary__text {
+  @apply font-inter-semibold text-base text-text-primary;
+}
+
+@utility btn-danger {
+  @apply w-full items-center rounded-lg bg-out-of-stock px-4 py-3;
+}
+
+@utility btn-danger__text {
+  @apply font-inter-semibold text-base text-white;
+}
