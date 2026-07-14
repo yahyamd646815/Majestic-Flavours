@@ -32,6 +32,8 @@ Global utilities to create in global.css:
 - .btn-primary — gold background, dark text, rounded-lg, full width
 - .btn-danger — red background, white text, rounded-lg
 
+Syntax requirement: global.css must use Tailwind v4 utility syntax. Import Tailwind with @import "tailwindcss" and define all custom classes using the @utility directive. Do not use the deprecated v3 @tailwind or @layer utilities directives.
+
 The app logo is the Majestic Flavors MF crown emblem. Place it in assets/images/ and register it in constants/images.ts as images.logo.
 
 Ensure all tokens are consistent and accessible as NativeWind utilities across all future screens.
