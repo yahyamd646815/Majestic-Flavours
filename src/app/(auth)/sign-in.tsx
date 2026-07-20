@@ -1,3 +1,5 @@
+import { useAuth, useSignIn } from "@clerk/expo";
+import { router, type Href } from "expo-router";
 import { useState } from "react";
 import {
   ActivityIndicator,
@@ -15,15 +17,81 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { images } from "@/constants/images";
 import { colors, fonts, radii, spacing } from "@/constants/theme";
+import { parseRole } from "@/types/role";
+
+const NO_ROLE_MESSAGE =
+  "Your account has not been assigned a role. Please contact your administrator.";
+
+// Lives outside the component on purpose. `(auth)/_layout.tsx` can briefly
+// unmount this screen during a Clerk session transition (isLoaded flickers
+// false around sign-out), which wipes normal useState. A module-level
+// variable survives that remount so the message still reaches the screen
+// once it comes back.
+let pendingAuthError: string | null = null;
 
 export default function SignIn() {
+  const { signIn, errors, fetchStatus } = useSignIn();
+  const { signOut } = useAuth();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(() => {
+    if (pendingAuthError) {
+      const msg = pendingAuthError;
+      pendingAuthError = null;
+      return msg;
+    }
+    return null;
+  });
 
-  function handleSignIn() {
-    setIsSubmitting(true);
-    setTimeout(() => setIsSubmitting(false), 1200);
+  const isSubmitting = fetchStatus === "fetching";
+
+  const clerkError =
+    errors.fields.identifier?.message ??
+    errors.fields.password?.message ??
+    errors.global?.[0]?.message ??
+    null;
+  const displayError = formError ?? clerkError;
+
+  async function handleSignIn() {
+    setFormError(null);
+
+    const { error } = await signIn.password({
+      emailAddress: email.trim(),
+      password,
+    });
+    if (error) return;
+
+    if (signIn.status === "complete") {
+      const { error: finalizeError } = await signIn.finalize({
+        navigate: async ({ session, decorateUrl }) => {
+          try {
+            if (session?.currentTask) {
+              pendingAuthError =
+                "Additional account setup is required. Please contact your administrator.";
+              await signOut();
+              return;
+            }
+            const role = parseRole(session?.user?.publicMetadata?.role);
+            if (!role) {
+              pendingAuthError = NO_ROLE_MESSAGE;
+              await signOut();
+              return;
+            }
+            const url = decorateUrl(role === "employee" ? "/reports" : "/");
+            router.replace(url as Href);
+          } catch {
+            pendingAuthError = "Something went wrong. Please try again.";
+          }
+        },
+      });
+      if (finalizeError) setFormError("Something went wrong. Please try again.");
+      return;
+    }
+
+    if (signIn.status === "needs_second_factor" || signIn.status === "needs_client_trust") {
+      setFormError("Additional verification is required. Please contact your administrator.");
+    }
   }
 
   return (
@@ -71,6 +139,12 @@ export default function SignIn() {
               style={styles.input}
             />
           </View>
+
+          {displayError ? (
+            <Text className="mt-3 text-center font-inter text-sm text-out-of-stock">
+              {displayError}
+            </Text>
+          ) : null}
 
           <TouchableOpacity
             className="btn-primary mt-6"

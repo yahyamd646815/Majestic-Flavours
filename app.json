@@ -17,7 +17,8 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.yahyamd6468.Majestic_Flavours"
     },
     "web": {
       "output": "static",
@@ -45,11 +46,19 @@
             "./assets/fonts/Inter-Bold.ttf"
           ]
         }
-      ]
+      ],
+      "@clerk/expo",
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "23fd4d8b-a07c-429b-880c-9f90d56e86b8"
+      }
     }
   }
 }
