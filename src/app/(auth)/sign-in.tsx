@@ -22,18 +22,30 @@ import { parseRole } from "@/types/role";
 const NO_ROLE_MESSAGE =
   "Your account has not been assigned a role. Please contact your administrator.";
 
+// Lives outside the component on purpose. `(auth)/_layout.tsx` can briefly
+// unmount this screen during a Clerk session transition (isLoaded flickers
+// false around sign-out), which wipes normal useState. A module-level
+// variable survives that remount so the message still reaches the screen
+// once it comes back.
+let pendingAuthError: string | null = null;
+
 export default function SignIn() {
   const { signIn, errors, fetchStatus } = useSignIn();
   const { signOut } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [formError, setFormError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(() => {
+    if (pendingAuthError) {
+      const msg = pendingAuthError;
+      pendingAuthError = null;
+      return msg;
+    }
+    return null;
+  });
 
   const isSubmitting = fetchStatus === "fetching";
 
-  // Clerk surfaces auth failures (wrong password, unknown email, etc.)
-  // reactively. `formError` holds messages we raise ourselves (no role, etc.).
   const clerkError =
     errors.fields.identifier?.message ??
     errors.fields.password?.message ??
@@ -48,43 +60,38 @@ export default function SignIn() {
       emailAddress: email.trim(),
       password,
     });
-    if (error) {
-      // Surfaced via `displayError` from the reactive `errors` state.
-      return;
-    }
+    if (error) return;
 
     if (signIn.status === "complete") {
       const { error: finalizeError } = await signIn.finalize({
-       navigate: async ({ session, decorateUrl }) => {
-        if (session?.currentTask) {
-          // A Clerk session task (e.g. forced re-verification) must be
-          // resolved before entering the app. No task UI exists yet, so
-          // sign out rather than leave the user half-authenticated.
-          setFormError(
-            "Additional account setup is required. Please contact your administrator.",
-          );
-          await signOut();
-          return;
-        }
-
-        const role = parseRole(session?.user?.publicMetadata?.role);
-
-        if (!role) {
-          await signOut();
-          setFormError(NO_ROLE_MESSAGE);
-          return;
-        }
-
-        const url = decorateUrl(role === "employee" ? "/reports" : "/");
-        router.replace(url as Href);
-      },
-    });
-
-    if (finalizeError) {
-      setFormError("Something went wrong. Please try again.");
+        navigate: async ({ session, decorateUrl }) => {
+          try {
+            if (session?.currentTask) {
+              pendingAuthError =
+                "Additional account setup is required. Please contact your administrator.";
+              await signOut();
+              return;
+            }
+            const role = parseRole(session?.user?.publicMetadata?.role);
+            if (!role) {
+              pendingAuthError = NO_ROLE_MESSAGE;
+              await signOut();
+              return;
+            }
+            const url = decorateUrl(role === "employee" ? "/reports" : "/");
+            router.replace(url as Href);
+          } catch {
+            pendingAuthError = "Something went wrong. Please try again.";
+          }
+        },
+      });
+      if (finalizeError) setFormError("Something went wrong. Please try again.");
+      return;
     }
-   return;
-  }
+
+    if (signIn.status === "needs_second_factor" || signIn.status === "needs_client_trust") {
+      setFormError("Additional verification is required. Please contact your administrator.");
+    }
   }
 
   return (
