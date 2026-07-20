@@ -79,6 +79,10 @@ export default function SignIn() {
               return;
             }
             const url = decorateUrl(role === "employee" ? "/reports" : "/");
+            if (Platform.OS === "web" && url.startsWith("http")) {
+              window.location.assign(url);
+              return;
+            }
             router.replace(url as Href);
           } catch {
             pendingAuthError = "Something went wrong. Please try again.";
