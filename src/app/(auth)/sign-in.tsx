@@ -164,7 +164,7 @@ export default function SignIn() {
           </TouchableOpacity>
 
           <Text className="mt-4 text-center font-inter text-sm text-text-secondary">
-            Forgot password?
+            Forgot your password? Contact your administrator.
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
