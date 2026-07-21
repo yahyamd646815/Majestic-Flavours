@@ -5,17 +5,8 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import type { Report } from "@/types/inventory";
 
 type ReportState = {
-  /**
-   * User-generated daily reports. This is real data with no seed source, so it
-   * is fully persisted and must survive app restarts.
-   */
   reports: Report[];
   addReport: (report: Report) => void;
-  /**
-   * Updates a report's content. Locked reports (past midnight) cannot be
-   * edited, so this is a no-op that returns `false` in that case; returns
-   * `true` on a successful update.
-   */
   updateReport: (id: string, content: string) => boolean;
   getReportsForItem: (itemId: string) => Report[];
   getReportsForEmployee: (employeeId: string) => Report[];
@@ -26,7 +17,7 @@ export const useReportStore = create<ReportState>()(
     (set, get) => ({
       reports: [],
       addReport: (report) =>
-        set((state) => ({ reports: [...state.reports, report] })),
+        set((state) => ({ reports: [...state.reports, { ...report }] })),
       updateReport: (id, content) => {
         const report = get().reports.find((r) => r.id === id);
         if (!report || report.isLocked) return false;
@@ -38,9 +29,13 @@ export const useReportStore = create<ReportState>()(
         return true;
       },
       getReportsForItem: (itemId) =>
-        get().reports.filter((report) => report.itemId === itemId),
+        get()
+          .reports.filter((report) => report.itemId === itemId)
+          .map((report) => ({ ...report })),
       getReportsForEmployee: (employeeId) =>
-        get().reports.filter((report) => report.employeeId === employeeId),
+        get()
+          .reports.filter((report) => report.employeeId === employeeId)
+          .map((report) => ({ ...report })),
     }),
     {
       name: "report-storage",

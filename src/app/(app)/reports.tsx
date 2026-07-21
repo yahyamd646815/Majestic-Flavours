@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { DevClearStorageButton } from "@/components/DevClearStorageButton";
 import { colors } from "@/constants/theme";
+import { clearPersistedState } from "@/lib/clearPersistedState";
 
 /**
  * Reports placeholder at `/reports`. The real Reports screen is built in a
@@ -21,7 +22,10 @@ export default function Reports() {
         <TouchableOpacity
           className="btn-primary"
           activeOpacity={0.85}
-          onPress={() => void signOut()}
+          onPress={() => {
+            clearPersistedState();
+            void signOut();
+          }}
         >
           <Text className="btn-primary__text">Sign Out</Text>
         </TouchableOpacity>
