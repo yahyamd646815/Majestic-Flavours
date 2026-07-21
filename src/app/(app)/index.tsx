@@ -4,6 +4,10 @@ import { Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { colors } from "@/constants/theme";
+import { categories } from "@/data/categories";
+import { sampleInventory } from "@/data/sampleInventory";
+import { sampleUsers } from "@/data/sampleUsers";
+import { units } from "@/data/units";
 import { parseRole } from "@/types/role";
 
 /**
@@ -12,6 +16,14 @@ import { parseRole } from "@/types/role";
  * to Reports.
  */
 export default function Dashboard() {
+  console.log("[DATA CHECK]", {
+    items: sampleInventory.length,
+    users: sampleUsers.length,
+    categories: categories.length,
+    units: units.length,
+    firstItem: sampleInventory[0],
+  });
+
   const { signOut } = useAuth();
   const { user } = useUser();
   const role = parseRole(user?.publicMetadata?.role);
