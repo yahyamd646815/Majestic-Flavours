@@ -2,6 +2,7 @@ import { useAuth } from "@clerk/expo";
 import { Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { DevClearStorageButton } from "@/components/DevClearStorageButton";
 import { colors } from "@/constants/theme";
 
 /**
@@ -24,6 +25,8 @@ export default function Reports() {
         >
           <Text className="btn-primary__text">Sign Out</Text>
         </TouchableOpacity>
+
+        <DevClearStorageButton />
       </View>
     </SafeAreaView>
   );

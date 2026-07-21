@@ -3,6 +3,7 @@ import { Redirect } from "expo-router";
 import { Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { DevClearStorageButton } from "@/components/DevClearStorageButton";
 import { colors } from "@/constants/theme";
 import { parseRole } from "@/types/role";
 
@@ -12,7 +13,6 @@ import { parseRole } from "@/types/role";
  * to Reports.
  */
 export default function Dashboard() {
-
   const { signOut } = useAuth();
   const { user } = useUser();
   const role = parseRole(user?.publicMetadata?.role);
@@ -31,6 +31,8 @@ export default function Dashboard() {
         >
           <Text className="btn-primary__text">Sign Out</Text>
         </TouchableOpacity>
+
+        <DevClearStorageButton />
       </View>
     </SafeAreaView>
   );
