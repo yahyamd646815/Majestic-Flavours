@@ -8,11 +8,6 @@ import { colors } from "@/constants/theme";
 import { clearPersistedState } from "@/lib/clearPersistedState";
 import { parseRole } from "@/types/role";
 
-/**
- * Dashboard placeholder at `/` (Admin and Manager only). The real dashboard is
- * built in a later prompt. Employees are never allowed here — they are bounced
- * to Reports.
- */
 export default function Dashboard() {
   const { signOut } = useAuth();
   const { user } = useUser();
@@ -29,8 +24,10 @@ export default function Dashboard() {
           className="btn-primary"
           activeOpacity={0.85}
           onPress={() => {
-            clearPersistedState();
-            void signOut();
+            void (async () => {
+              await clearPersistedState();
+              await signOut();
+            })();
           }}
         >
           <Text className="btn-primary__text">Sign Out</Text>

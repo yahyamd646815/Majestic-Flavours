@@ -10,6 +10,7 @@ type ReportState = {
   updateReport: (id: string, content: string) => boolean;
   getReportsForItem: (itemId: string) => Report[];
   getReportsForEmployee: (employeeId: string) => Report[];
+  reset: () => void;
 };
 
 export const useReportStore = create<ReportState>()(
@@ -36,6 +37,7 @@ export const useReportStore = create<ReportState>()(
         get()
           .reports.filter((report) => report.employeeId === employeeId)
           .map((report) => ({ ...report })),
+      reset: () => set({ reports: [] }),
     }),
     {
       name: "report-storage",

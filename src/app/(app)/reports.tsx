@@ -6,11 +6,6 @@ import { DevClearStorageButton } from "@/components/DevClearStorageButton";
 import { colors } from "@/constants/theme";
 import { clearPersistedState } from "@/lib/clearPersistedState";
 
-/**
- * Reports placeholder at `/reports`. The real Reports screen is built in a
- * later prompt. Reachable by every signed-in role; Employees land here after
- * sign-in.
- */
 export default function Reports() {
   const { signOut } = useAuth();
 
@@ -23,8 +18,10 @@ export default function Reports() {
           className="btn-primary"
           activeOpacity={0.85}
           onPress={() => {
-            clearPersistedState();
-            void signOut();
+            void (async () => {
+              await clearPersistedState();
+              await signOut();
+            })();
           }}
         >
           <Text className="btn-primary__text">Sign Out</Text>

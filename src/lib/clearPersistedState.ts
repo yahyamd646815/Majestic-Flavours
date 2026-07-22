@@ -2,16 +2,16 @@ import { useInventoryStore } from "@/store/inventoryStore";
 import { useReportStore } from "@/store/reportStore";
 
 /**
- * Wipes this app's locally persisted Zustand state (inventory filter
- * preference, reports). Called on sign-out so the next person to sign in on
- * this device doesn't see the previous user's cached data, and available for
- * the dev-only "clear storage" testing button.
+ * Resets in-memory state AND wipes this app's persisted AsyncStorage keys,
+ * so the next person to sign in on this device doesn't inherit the previous
+ * user's cached data — even without closing and reopening the app.
  *
  * This is a local-device convenience, not real per-user data isolation —
- * that is Supabase + Row Level Security's job (prompt 13). This just clears
- * the shared on-device cache between sessions.
+ * that is Supabase + Row Level Security's job (prompt 13).
  */
-export function clearPersistedState() {
-  useInventoryStore.persist.clearStorage();
-  useReportStore.persist.clearStorage();
+export async function clearPersistedState() {
+  useInventoryStore.getState().reset();
+  useReportStore.getState().reset();
+  await useInventoryStore.persist.clearStorage();
+  await useReportStore.persist.clearStorage();
 }
