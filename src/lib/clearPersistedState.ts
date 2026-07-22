@@ -8,10 +8,25 @@ import { useReportStore } from "@/store/reportStore";
  *
  * This is a local-device convenience, not real per-user data isolation —
  * that is Supabase + Row Level Security's job (prompt 13).
+ *
+ * Deliberately never throws: sign-out must always be able to proceed even if
+ * clearing the local cache fails. A stale cache is a much smaller problem
+ * than a user being stuck unable to sign out. Failures are logged so they're
+ * visible during development.
  */
 export async function clearPersistedState() {
   useInventoryStore.getState().reset();
   useReportStore.getState().reset();
-  await useInventoryStore.persist.clearStorage();
-  await useReportStore.persist.clearStorage();
+
+  try {
+    await useInventoryStore.persist.clearStorage();
+  } catch (error) {
+    console.error("[clearPersistedState] failed to clear inventory-storage:", error);
+  }
+
+  try {
+    await useReportStore.persist.clearStorage();
+  } catch (error) {
+    console.error("[clearPersistedState] failed to clear report-storage:", error);
+  }
 }
