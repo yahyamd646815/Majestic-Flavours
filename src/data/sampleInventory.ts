@@ -115,7 +115,7 @@ export const sampleInventory: InventoryItem[] = [
     id: "item-12",
     name: "Dish Soap",
     category: "Cleaning Supplies",
-    currentQuantity: 4,
+    currentQuantity: 6,
     unit: "boxes",
     minThreshold: 5,
     assignedEmployeeIds: ["user-4", "user-6"],
