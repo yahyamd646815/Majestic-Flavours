@@ -74,23 +74,27 @@ Do not install or use new libraries without user approval.
 
 ## Architecture
 
-Use this folder structure:
+All app code lives under `src/`. Import via the `@/` alias, which resolves to `src/*` (see `tsconfig.json`). Do not create top-level `app/`, `components/`, `data/`, etc. folders outside `src/` — this has caused real path/import bugs before.
+
+Current structure:
 
 ```
-app/
-  (auth)/
-  (tabs)/
-  inventory/
-  reports/
-components/
-constants/
-data/
-hooks/
-lib/
-store/
-types/
-assets/
+src/
+  app/
+    (auth)/       — sign-in and other unauthenticated screens
+    (app)/        — all authenticated tab screens (Dashboard, Inventory,
+                     Reports, Users, Settings) and their shared layout/guard
+  components/
+  constants/
+  data/
+  hooks/
+  lib/
+  store/
+  types/
+  assets/
 ```
+
+Nested routes (for example, an item detail screen under Inventory) may be added under `(app)/` in later prompts as the app grows — keep it flat until there's an actual need for nesting.
 
 **app/** — routes and screens only. Screens compose components and call hooks or stores. No large UI blocks or business logic here.
 
@@ -101,7 +105,9 @@ Do not create tiny one-off components too early.
 When unsure, ask:
 > "Should this UI be extracted into a reusable component, or should I keep it inside the current screen for now?"
 
-**store/** — Zustand stores for inventory state, user role, report data, and alert state. Persist with AsyncStorage where needed.
+**store/** — Zustand stores for inventory state, report data, and local UI preferences (e.g. the selected category filter). Persist with AsyncStorage where it genuinely benefits the user (e.g. reports, filter preference) — do not persist data that is only ever re-seeded from `data/` files.
+
+The current user's identity and role are **never** stored in Zustand. Clerk session data (`useUser()`, `useAuth()`) is the single source of truth for who is signed in and what role they have — read it directly wherever it's needed. There is no `userStore`.
 
 **lib/** — external service helpers. Examples:
 ```
@@ -119,12 +125,15 @@ Never expose secret keys here.
 
 ## Role-Based Access
 
-There are three roles managed through Clerk:
-- Admin — full access to all screens and all functions including user management, item deletion, and settings
-- Manager — can add items, view all inventory and reports, export reports, but cannot delete items or manage users
-- Employee — can only access the Reports screen for items they are personally assigned to, and can submit and edit their own reports until midnight
+There are three roles managed through Clerk, stored lowercase in `publicMetadata.role` (`"admin"`, `"manager"`, `"employee"`):
 
-Always check the user role before rendering sensitive UI or allowing destructive actions.
+- **Admin** — full access to all screens and functions: user management, **role assignment/changes**, item deletion, and settings. Role changes are Admin-only — no other role may modify anyone's role.
+- **Manager** — can add items, add categories, and change which category an item belongs to; can view all inventory and reports, and export reports. Cannot delete items, delete categories, and cannot manage users or roles.
+- **Employee** — sees a scoped version of the Dashboard and a scoped version of Settings (not full Settings access), can add or remove quantity on inventory items, and can generate a report covering the last 24 hours. Employees do not have user management, role management, or item deletion.
+
+This Employee scope is broader than "Reports only" — it was intentionally expanded from the original plan. Screens and prompts built before this update may still reflect the narrower placeholder version; bring them in line with this description as they're built out.
+
+Always check the user role (from Clerk, never a store) before rendering sensitive UI or allowing destructive actions.
 
 ---
 
@@ -162,7 +171,7 @@ When building from an attached design image:
 - Use consistent reusable styles
 - Make the UI responsive for different screen sizes
 
-Prefer reusable class patterns through utilities in `global.css`. If a utility does not exist and you see an opportunity, create it in `global.css` following the BEM method.
+Prefer reusable class patterns through utilities in `global.css`. If a utility does not exist and you see an opportunity, create it in `global.css` following the BEM method. Check `global.css` for an existing utility before writing new inline styles — several card, badge, and button utilities already exist and should be reused for consistency.
 
 Avoid large inline styles unless required.
 
@@ -199,6 +208,7 @@ Use `StyleSheet` or inline styles for these React Native components and scenario
 | **Shadow (iOS/Android)** | Different shadow syntax per platform | StyleSheet with platform checks |
 | **Transform arrays** | Complex transform combinations | StyleSheet |
 | **Z-index** | Sometimes needs explicit StyleSheet | StyleSheet |
+| **Tab bar (`Tabs.Screen` `screenOptions`)** | `tabBarStyle`, `tabBarIcon`, etc. are React Navigation style objects, not standard RN view props | StyleSheet or inline styles |
 
 ### When to Use StyleSheet
 
@@ -306,9 +316,10 @@ Do not import image assets directly inside screens or components.
 
 ## State Management Rules
 
-- Zustand for global client state (inventory items, user role, alerts, report data, selected category filter)
-- Local state for temporary UI state such as modal visibility or form input
-- AsyncStorage for persistence where needed
+- Zustand for global client state that is genuinely app-wide and not owned by Clerk: inventory items/categories, report data, and local UI preferences like the selected category filter.
+- The current user and their role always come from Clerk (`useUser()`, `useAuth()`), never from Zustand. See Architecture → `store/` above.
+- Local state (`useState`) for temporary UI state such as modal visibility or form input.
+- AsyncStorage for persistence, via Zustand's `persist` middleware, only for state that should survive an app restart and isn't just re-seeded from a `data/` file (e.g. persist reports and filter preference; do not persist seeded inventory items/categories themselves).
 
 ---
 
@@ -326,17 +337,17 @@ Any destructive action (deleting an item or deleting a user) must trigger a two-
 - First popup: "Are you sure you want to delete this?" with Confirm and Cancel buttons
 - Second popup: "This action cannot be undone. Type DELETE to confirm." — deletion only proceeds if the user types the word DELETE exactly
 
-Never skip or shortcut this flow for any delete action.
+Never skip or shortcut this flow for any delete action. This applies to real, user-facing destructive actions on business data — it does not apply to development-only tooling (e.g. a `__DEV__`-gated test/debug control that never exists in a production build).
 
 ---
 
 ## Report Rules
 
-- Employees submit daily text reports for their assigned items only
-- Reports are editable until midnight on the day they are submitted, then locked permanently
-- Reports are automatically deleted after 4 months
-- Admins and Managers can export reports as PDF or XLSX
-- Exports must include: date, employee name, item name, category, and report content
+- Employees submit reports for their assigned items only, covering the last 24 hours (see Role-Based Access above).
+- Reports are editable until midnight on the day they are submitted, then locked permanently.
+- Reports are automatically deleted after 4 months.
+- Admins and Managers can export reports as PDF or XLSX.
+- Exports must include: date, employee name, item name, category, and report content.
 
 ---
 
@@ -352,8 +363,8 @@ Use Supabase Row Level Security policies to enforce role-based access at the dat
 ## Clerk Rules
 
 Use Clerk for authentication and user management. Do not build custom auth.
-Store user role (Admin, Manager, Employee) in Clerk's `publicMetadata` field.
-Always read the role from Clerk session data before rendering role-gated UI.
+Store user role (admin, manager, employee — lowercase) in Clerk's `publicMetadata` field.
+Always read the role from Clerk session data before rendering role-gated UI. This is the single source of truth for identity and role — never duplicate it into a Zustand store.
 
 ---
 
