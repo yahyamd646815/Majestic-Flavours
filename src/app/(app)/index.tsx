@@ -7,7 +7,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { DevClearStorageButton } from "@/components/DevClearStorageButton";
 import { colors } from "@/constants/theme";
 import { sampleUsers } from "@/data/sampleUsers";
-import { clearPersistedState } from "@/lib/clearPersistedState";
 import { useInventoryStore } from "@/store/inventoryStore";
 import { parseRole } from "@/types/role";
 
@@ -133,12 +132,7 @@ export default function Dashboard() {
           <TouchableOpacity
             className="btn-primary"
             activeOpacity={0.85}
-            onPress={() => {
-              void (async () => {
-                await clearPersistedState();
-                await signOut();
-              })();
-            }}
+            onPress={() => void signOut()}
           >
             <Text className="btn-primary__text">Sign Out</Text>
           </TouchableOpacity>
