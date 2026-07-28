@@ -128,7 +128,7 @@ Never expose secret keys here.
 There are three roles managed through Clerk, stored lowercase in `publicMetadata.role` (`"admin"`, `"manager"`, `"employee"`):
 
 - **Admin** — full access to all screens and functions: user management, **role assignment/changes**, item deletion, and settings. Role changes are Admin-only — no other role may modify anyone's role.
-- **Manager** — can add items, add categories, and change which category an item belongs to; can view all inventory and reports, and export reports. Cannot delete items, delete categories, and cannot manage users or roles.
+- **Manager** — can add items, add categories, and change which category an item belongs to; can view all inventory and reports, and export reports. Also has a scoped version of Settings (not full Admin access — exact scope to be defined when the Settings screen is built). Cannot delete items, delete categories, and cannot manage users or roles.
 - **Employee** — sees a scoped version of the Dashboard and a scoped version of Settings (not full Settings access), can add or remove quantity on inventory items, and can generate a report covering the last 24 hours. Employees do not have user management, role management, or item deletion.
 
 This Employee scope is broader than "Reports only" — it was intentionally expanded from the original plan. Screens and prompts built before this update may still reflect the narrower placeholder version; bring them in line with this description as they're built out.
@@ -199,7 +199,7 @@ Use `StyleSheet` or inline styles for these React Native components and scenario
 | **Button** | Only supports `title` and `onPress` props — cannot customize background, border, padding | `TouchableOpacity` with custom styles |
 | **KeyboardAvoidingView** | Behavior props not supported by className | Inline styles or StyleSheet |
 | **Modal** | `visible`, `transparent` props | Inline styles |
-| **ScrollView** | `contentContainerStyle`, `indicatorStyle` | StyleSheet |
+| **ScrollView** | `contentContainerStyle`, `indicatorStyle`, and (for horizontal scrollers) the ScrollView's own height/`flexGrow` — leaving these unset can cause children to stretch unexpectedly | StyleSheet |
 | **TextInput** | Input-specific props like `underlineColorAndroid` | Inline styles |
 | **Animated.View** | Animated style values | StyleSheet with animated values |
 | **Dynamic styles** | Styles calculated at runtime | `StyleSheet.create()` or inline |
