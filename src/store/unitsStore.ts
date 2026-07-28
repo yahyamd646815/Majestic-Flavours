@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 import { units as seedUnits } from "@/data/units";
-import { slugify } from "@/lib/id";
+import { generateId, slugify } from "@/lib/id";
 import { useInventoryStore } from "@/store/inventoryStore";
 import type { Unit } from "@/types/inventory";
 
@@ -28,11 +28,12 @@ export const useUnitsStore = create<UnitsState>()(
         );
         if (isDuplicate) return false;
 
+        const slug = slugify(trimmedLabel);
+        const idTaken = get().units.some((unit) => unit.id === slug);
+        const id = slug.length === 0 || idTaken ? generateId("unit") : slug;
+
         set((state) => ({
-          units: [
-            ...state.units,
-            { id: slugify(trimmedLabel), label: trimmedLabel },
-          ],
+          units: [...state.units, { id, label: trimmedLabel }],
         }));
         return true;
       },

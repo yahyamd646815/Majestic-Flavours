@@ -70,16 +70,16 @@ export const useInventoryStore = create<InventoryState>()(
         if (trimmedName.length === 0) return false;
 
         const isDuplicate = get().categories.some(
-          (category) =>
-            category.name.toLowerCase() === trimmedName.toLowerCase(),
+          (category) => category.name.toLowerCase() === trimmedName.toLowerCase(),
         );
         if (isDuplicate) return false;
 
+        const slug = slugify(trimmedName);
+        const idTaken = get().categories.some((category) => category.id === slug);
+        const id = slug.length === 0 || idTaken ? generateId("category") : slug;
+
         set((state) => ({
-          categories: [
-            ...state.categories,
-            { id: slugify(trimmedName), name: trimmedName },
-          ],
+          categories: [...state.categories, { id, name: trimmedName }],
         }));
         return true;
       },
