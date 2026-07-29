@@ -48,8 +48,8 @@ export function InventoryCard({ item, canDelete, onEdit, onDelete }: InventoryCa
 
       {assignedNames.length > 0 ? (
         <View className="flex-row flex-wrap gap-2">
-          {assignedNames.map((name) => (
-            <View key={name} className="chip">
+          {assignedNames.map((name, index) => (
+            <View key={`${item.id}-${index}`} className="chip">
               <Text className="chip__text">{name}</Text>
             </View>
           ))}

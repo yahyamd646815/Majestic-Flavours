@@ -110,6 +110,8 @@ export default function Inventory() {
         style={styles.fabShadow}
         activeOpacity={0.85}
         onPress={openAddForm}
+        accessibilityRole="button"
+        accessibilityLabel="Add item"
       >
         <Ionicons name="add" size={28} color={colors.textPrimary} />
       </TouchableOpacity>
