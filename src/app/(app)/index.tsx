@@ -6,7 +6,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { DevClearStorageButton } from "@/components/DevClearStorageButton";
 import { colors } from "@/constants/theme";
-import { sampleUsers } from "@/data/sampleUsers";
+import { getAssignedNames } from "@/lib/getAssignedNames";
 import { useInventoryStore } from "@/store/inventoryStore";
 import { parseRole } from "@/types/role";
 
@@ -15,14 +15,6 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
 });
-
-function getAssignedNames(employeeIds: string[]): string {
-  const names = employeeIds
-    .map((id) => sampleUsers.find((user) => user.id === id)?.name)
-    .filter((name): name is string => Boolean(name));
-
-  return names.length > 0 ? names.join(", ") : "Unassigned";
-}
 
 export default function Dashboard() {
   const { signOut } = useAuth();
@@ -96,6 +88,7 @@ export default function Dashboard() {
                   const badgeTextClass = isOutOfStock
                     ? "status-badge__text--out-of-stock"
                     : "status-badge__text--low-stock";
+                  const assignedNames = getAssignedNames(item.assignedEmployeeIds);
 
                   return (
                     <View key={item.id} className="card gap-2">
@@ -120,7 +113,7 @@ export default function Dashboard() {
                       </Text>
 
                       <Text className="font-inter text-xs text-text-secondary">
-                        Assigned: {getAssignedNames(item.assignedEmployeeIds)}
+                        Assigned: {assignedNames.length > 0 ? assignedNames.join(", ") : "Unassigned"}
                       </Text>
                     </View>
                   );

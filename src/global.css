@@ -108,3 +108,23 @@
 @utility btn-danger__text {
   @apply font-inter-semibold text-base text-white;
 }
+
+@utility chip {
+  @apply rounded-full border border-border bg-white px-3 py-1.5;
+}
+
+@utility chip--active {
+  @apply border-gold bg-gold;
+}
+
+@utility chip__text {
+  @apply font-inter-medium text-xs text-text-secondary;
+}
+
+@utility chip__text--active {
+  @apply font-inter-semibold text-xs text-text-primary;
+}
+
+@utility fab {
+  @apply absolute bottom-6 right-6 h-14 w-14 items-center justify-center rounded-full bg-gold;
+}
