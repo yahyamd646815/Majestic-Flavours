@@ -21,14 +21,14 @@ export const sampleUsers: AppUser[] = [
   },
   {
     id: "user-4",
-    name: "Usman Tariq",
-    email: "usman.tariq@majesticflavors.com",
+    name: "Yahya Mohammed",
+    email: "yahyamd646815+employee@gmail.com",
     role: "employee",
   },
   {
     id: "user-5",
-    name: "Fatima Malik",
-    email: "fatima.malik@majesticflavors.com",
+    name: "Mohammed Yahya",
+    email: "yahyamd646815+employee1@gmail.com",
     role: "employee",
   },
   {
