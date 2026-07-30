@@ -361,6 +361,10 @@ Use the Supabase JavaScript client initialized in `lib/supabase.ts`.
 Never expose the Supabase service key in client code. Only the anon key is safe for client-side use.
 Use Supabase Row Level Security policies to enforce role-based access at the database level.
 
+### Features that need a backend that doesn't exist yet
+
+Some features (creating or editing real Clerk user accounts, real database writes before Supabase is connected) genuinely require a backend the app doesn't have. Do not fake these with a local Zustand store standing in for the backend — a store that pretends to manage real users or write real data, when nothing it does actually reaches Clerk or a database, is misleading and will need to be torn out later. Instead: build the real screen and real display using whatever placeholder data already exists (e.g. `sampleUsers`), but gate the mutating action behind an honest "Coming soon" message (the `Alert.alert` pattern already used for report export) until the real backend integration lands.
+
 ---
 
 ## Clerk Rules
