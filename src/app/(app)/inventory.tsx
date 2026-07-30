@@ -9,6 +9,7 @@ import { CategoryFilter } from "@/components/CategoryFilter";
 import { DeleteConfirmModal } from "@/components/DeleteConfirmModal";
 import { InventoryCard } from "@/components/InventoryCard";
 import { ItemFormModal, type ItemFormValues } from "@/components/ItemFormModal";
+import { SearchBar } from "@/components/SearchBar";
 import { colors } from "@/constants/theme";
 import { useInventoryStore } from "@/store/inventoryStore";
 import type { InventoryItem } from "@/types/inventory";
@@ -32,14 +33,16 @@ export default function Inventory() {
   // Bumped on every open so ItemFormModal remounts (via its `key`) and its
   // fields reset from scratch instead of carrying over the previous session.
   const [formSession, setFormSession] = useState(0);
+  const [searchQuery, setSearchQuery] = useState("");
 
-  const filteredItems = useMemo(
-    () =>
-      selectedCategory === null
-        ? items
-        : items.filter((item) => item.category === selectedCategory),
-    [items, selectedCategory],
-  );
+  const filteredItems = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return items.filter((item) => {
+      const matchesCategory = selectedCategory === null || item.category === selectedCategory;
+      const matchesQuery = query.length === 0 || item.name.toLowerCase().includes(query);
+      return matchesCategory && matchesQuery;
+    });
+  }, [items, selectedCategory, searchQuery]);
 
   if (role !== "admin" && role !== "manager") return <Redirect href="/reports" />;
 
@@ -73,6 +76,14 @@ export default function Inventory() {
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.white }}>
       <View className="flex-1 gap-4 pt-4">
         <Text className="px-4 font-inter-bold text-2xl text-maroon">Inventory</Text>
+
+        <View className="px-4">
+          <SearchBar
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Search items"
+          />
+        </View>
 
         <CategoryFilter
           categories={categories}

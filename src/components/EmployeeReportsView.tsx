@@ -2,13 +2,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { type ReactElement, useMemo, useState } from "react";
 import { Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
+import { CategoryFilter } from "@/components/CategoryFilter";
 import { EmployeeReportCard } from "@/components/EmployeeReportCard";
 import { ReportSubmittedModal } from "@/components/ReportSubmittedModal";
+import { SearchBar } from "@/components/SearchBar";
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { getTodayIsoDate, isReportLocked } from "@/lib/reports";
 import { useInventoryStore } from "@/store/inventoryStore";
 import { baselineKey, useReportStore } from "@/store/reportStore";
-import type { InventoryItem, ReportItemChange } from "@/types/inventory";
+import type { Category, InventoryItem, ReportItemChange } from "@/types/inventory";
 
 type EmployeeReportsViewProps = {
   /** The signed-in employee's `sampleUsers` id. */
@@ -36,11 +38,36 @@ export function EmployeeReportsView({ employeeId, footer }: EmployeeReportsViewP
   );
 
   const [showConfirmation, setShowConfirmation] = useState(false);
+  // Local to this screen — the Admin/Manager Inventory screen owns
+  // inventoryStore.selectedCategory, and sharing it would let the two
+  // screens' filters interfere with each other.
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const assignedItems = useMemo(
     () => items.filter((item) => item.assignedEmployeeIds.includes(employeeId)),
     [items, employeeId],
   );
+
+  const assignedCategories = useMemo<Category[]>(() => {
+    const seen = new Set<string>();
+    const categories: Category[] = [];
+    for (const item of assignedItems) {
+      if (seen.has(item.category)) continue;
+      seen.add(item.category);
+      categories.push({ id: item.category, name: item.category });
+    }
+    return categories;
+  }, [assignedItems]);
+
+  const filteredItems = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return assignedItems.filter((item) => {
+      const matchesCategory = selectedCategory === null || item.category === selectedCategory;
+      const matchesQuery = query.length === 0 || item.name.toLowerCase().includes(query);
+      return matchesCategory && matchesQuery;
+    });
+  }, [assignedItems, selectedCategory, searchQuery]);
 
   // Only net changes are reported: an item never touched today has no baseline,
   // and one moved and put back matches its baseline again.
@@ -83,9 +110,23 @@ export function EmployeeReportsView({ employeeId, footer }: EmployeeReportsViewP
 
   return (
     <>
+      <View className="px-4">
+        <SearchBar
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          placeholder="Search your items"
+        />
+      </View>
+
+      <CategoryFilter
+        categories={assignedCategories}
+        selectedCategory={selectedCategory}
+        onSelect={setSelectedCategory}
+      />
+
       <FlatList
         className="flex-1"
-        data={assignedItems}
+        data={filteredItems}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         keyboardShouldPersistTaps="handled"
@@ -94,7 +135,9 @@ export function EmployeeReportsView({ employeeId, footer }: EmployeeReportsViewP
           <View className="items-center gap-2 py-16">
             <Ionicons name="clipboard-outline" size={40} color={colors.textSecondary} />
             <Text className="text-center font-inter-medium text-sm text-text-secondary">
-              You have no assigned items yet. Ask a manager to assign you some.
+              {assignedItems.length === 0
+                ? "You have no assigned items yet. Ask a manager to assign you some."
+                : "No items match your search."}
             </Text>
           </View>
         }
