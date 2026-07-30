@@ -65,6 +65,14 @@
   @apply font-inter-semibold text-xs text-white;
 }
 
+@utility badge-green {
+  @apply rounded-full bg-dark-green px-3 py-1;
+}
+
+@utility badge-green__text {
+  @apply font-inter-semibold text-xs text-white;
+}
+
 @utility status-badge {
   @apply rounded-full px-3 py-1;
 }
