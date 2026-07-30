@@ -128,8 +128,8 @@ Never expose secret keys here.
 There are three roles managed through Clerk, stored lowercase in `publicMetadata.role` (`"admin"`, `"manager"`, `"employee"`):
 
 - **Admin** — full access to all screens and functions: user management, **role assignment/changes**, item deletion, and settings. Role changes are Admin-only — no other role may modify anyone's role.
-- **Manager** — can add items, add categories, and change which category an item belongs to; can view all inventory and reports, and export reports. Also has a scoped version of Settings (not full Admin access — exact scope to be defined when the Settings screen is built). Cannot delete items, delete categories, and cannot manage users or roles.
-- **Employee** — sees a scoped version of the Dashboard and a scoped version of Settings (not full Settings access), can add or remove quantity on inventory items, and can generate a report covering the last 24 hours. Employees do not have user management, role management, or item deletion.
+- **Manager** — can add items, add categories, and change which category an item belongs to; can view all inventory and reports, and export reports. Settings scope: the Categories section (add only — no delete control, matching "cannot delete categories") and Sign Out. No Units section, no Report Retention info. Cannot delete items, delete categories, and cannot manage users or roles.
+- **Employee** — sees a scoped version of the Dashboard and a scoped version of Settings (Sign Out only — no Units, Categories, or Report Retention access), can add or remove quantity on inventory items, and can generate a report covering the last 24 hours. Employees do not have user management, role management, or item deletion.
 
 This Employee scope is broader than "Reports only" — it was intentionally expanded from the original plan. Screens and prompts built before this update may still reflect the narrower placeholder version; bring them in line with this description as they're built out.
 

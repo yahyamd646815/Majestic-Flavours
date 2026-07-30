@@ -1,9 +1,8 @@
-import { useAuth, useUser } from "@clerk/expo";
+import { useUser } from "@clerk/expo";
 import { Ionicons } from "@expo/vector-icons";
 import { Alert, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { DevClearStorageButton } from "@/components/DevClearStorageButton";
 import { EmployeeReportsView } from "@/components/EmployeeReportsView";
 import { ManagerReportsView } from "@/components/ManagerReportsView";
 import { colors } from "@/constants/theme";
@@ -15,7 +14,6 @@ function showExportComingSoon() {
 }
 
 export default function Reports() {
-  const { signOut } = useAuth();
   const { user } = useUser();
   const role = parseRole(user?.publicMetadata?.role);
   const canViewAllReports = role === "admin" || role === "manager";
@@ -25,15 +23,7 @@ export default function Reports() {
   const currentEmail = user?.primaryEmailAddress?.emailAddress;
   const currentSampleUser = sampleUsers.find((sampleUser) => sampleUser.email === currentEmail);
 
-  const footer = (
-    <View className="gap-3 pt-6">
-      <TouchableOpacity className="btn-primary" activeOpacity={0.85} onPress={() => void signOut()}>
-        <Text className="btn-primary__text">Sign Out</Text>
-      </TouchableOpacity>
-
-      <DevClearStorageButton />
-    </View>
-  );
+  const footer = <View className="pt-6" />;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.white }}>
