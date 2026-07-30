@@ -110,6 +110,9 @@ function FilterChip({
       className={isActive ? "chip chip--active" : "chip"}
       activeOpacity={0.8}
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ selected: isActive }}
     >
       <Text className={isActive ? "chip__text chip__text--active" : "chip__text"}>{label}</Text>
     </TouchableOpacity>

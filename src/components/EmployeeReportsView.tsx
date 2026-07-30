@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { type ReactElement, useMemo, useState } from "react";
-import { FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
 import { EmployeeReportCard } from "@/components/EmployeeReportCard";
 import { ReportSubmittedModal } from "@/components/ReportSubmittedModal";
@@ -70,7 +70,14 @@ export function EmployeeReportsView({ employeeId, footer }: EmployeeReportsViewP
   }
 
   function handleSubmit(content: string) {
-    submitReport(employeeId, todayIsoDate, content, todaysChanges);
+    const result = submitReport(employeeId, todayIsoDate, content, todaysChanges);
+    if (result === null) {
+      Alert.alert(
+        "Report could not be saved",
+        "It looks like the day has changed. Please reopen the app and try again.",
+      );
+      return;
+    }
     setShowConfirmation(true);
   }
 

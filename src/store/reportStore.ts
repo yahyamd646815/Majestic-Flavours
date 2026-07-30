@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 import { generateId } from "@/lib/id";
+import { getTodayIsoDate } from "@/lib/reports";
 import type { Report, ReportItemChange } from "@/types/inventory";
 
 /**
@@ -23,12 +24,13 @@ type ReportState = {
     itemId: string,
     currentQuantity: number,
   ) => number;
+  /** Returns the report id on success, or `null` if the submission was rejected. */
   submitReport: (
     employeeId: string,
     date: string,
     content: string,
     changes: ReportItemChange[],
-  ) => string;
+  ) => string | null;
   getReportForEmployeeAndDate: (employeeId: string, date: string) => Report | undefined;
   getReportsForItem: (itemId: string) => Report[];
   getReportsForEmployee: (employeeId: string) => Report[];
@@ -57,12 +59,31 @@ export const useReportStore = create<ReportState>()(
       // `dailyBaselines` vs. live quantities — so `changes` is already the
       // whole accurate picture, every time. Merging by item id would leave
       // stale entries behind for items an employee changed and then reverted
-      // back to their baseline (they'd correctly drop out of a fresh
-      // `changes` array, but a merge would never remove the old entry).
+      // back to their baseline.
+      //
+      // Rejects (returns null) rather than trusting the caller blindly:
+      // - `date` must match the store's own idea of "today" — guards against
+      //   a UI that went stale across a midnight rollover writing into the
+      //   wrong day's report.
+      // - an existing report already marked `isLocked` can never be written
+      //   to, regardless of what date was passed.
       submitReport: (employeeId, date, content, changes) => {
+        if (date !== getTodayIsoDate()) {
+          console.warn(
+            "[reportStore] Refusing to submit a report for a non-today date:",
+            date,
+          );
+          return null;
+        }
+
         const existing = get().reports.find(
           (report) => report.employeeId === employeeId && report.date === date,
         );
+
+        if (existing?.isLocked) {
+          console.warn("[reportStore] Refusing to modify a locked report:", existing.id);
+          return null;
+        }
 
         const itemChanges = changes.map((change) => ({ ...change }));
 
@@ -84,8 +105,6 @@ export const useReportStore = create<ReportState>()(
         }));
         return id;
       },
-      // Returned by reference (not copied like the getters below) so it is safe
-      // to call straight from a Zustand selector without re-rendering forever.
       getReportForEmployeeAndDate: (employeeId, date) =>
         get().reports.find(
           (report) => report.employeeId === employeeId && report.date === date,
