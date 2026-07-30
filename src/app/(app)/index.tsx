@@ -1,10 +1,9 @@
-import { useAuth, useUser } from "@clerk/expo";
+import { useUser } from "@clerk/expo";
 import { Ionicons } from "@expo/vector-icons";
 import { Redirect } from "expo-router";
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { DevClearStorageButton } from "@/components/DevClearStorageButton";
 import { colors } from "@/constants/theme";
 import { getAssignedNames } from "@/lib/getAssignedNames";
 import { useInventoryStore } from "@/store/inventoryStore";
@@ -17,7 +16,6 @@ const styles = StyleSheet.create({
 });
 
 export default function Dashboard() {
-  const { signOut } = useAuth();
   const { user } = useUser();
   const role = parseRole(user?.publicMetadata?.role);
   const items = useInventoryStore((state) => state.items);
@@ -121,16 +119,6 @@ export default function Dashboard() {
               )}
             </View>
           </View>
-
-          <TouchableOpacity
-            className="btn-primary"
-            activeOpacity={0.85}
-            onPress={() => void signOut()}
-          >
-            <Text className="btn-primary__text">Sign Out</Text>
-          </TouchableOpacity>
-
-          <DevClearStorageButton />
         </View>
       </ScrollView>
     </SafeAreaView>

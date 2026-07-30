@@ -89,7 +89,6 @@ export default function AppLayout() {
         name="settings"
         options={{
           title: "Settings",
-          href: isAdmin ? undefined : null,
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons name={focused ? "settings" : "settings-outline"} color={color} size={size} />
           ),
