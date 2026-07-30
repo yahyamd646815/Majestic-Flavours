@@ -21,12 +21,20 @@ export type InventoryItem = {
   createdAt: string;
 };
 
+/** One assigned item an employee touched during a reported day. */
+export type ReportItemChange = {
+  itemId: string;
+  startQuantity: number;
+  endQuantity: number;
+};
+
+/** One report per employee per calendar day, covering every item they touched. */
 export type Report = {
   id: string;
-  itemId: string;
   employeeId: string;
-  content: string;
-  date: string;
+  date: string; // YYYY-MM-DD
+  content: string; // "" is valid — written content is optional
+  itemChanges: ReportItemChange[];
   isLocked: boolean;
 };
 

@@ -343,11 +343,14 @@ Never skip or shortcut this flow for any delete action. This applies to real, us
 
 ## Report Rules
 
-- Employees submit reports for their assigned items only, covering the last 24 hours (see Role-Based Access above).
-- Reports are editable until midnight on the day they are submitted, then locked permanently.
+- One report per employee per calendar day — not one per item. A report covers every assigned item the employee touched that day, each recorded as a start-of-day quantity and an end-of-day quantity.
+- Written content is optional. An employee can submit a report with quantity changes only, no text, or both.
+- Reports are editable (both quantities and content) until midnight on the day they were submitted, then locked permanently.
+- On submitting or updating a report, show a confirmation with an OK button, in English, Arabic, and Urdu, thanking the employee and reminding them they can still change it until the day is over.
 - Reports are automatically deleted after 4 months.
+- Admins and Managers see, per employee, whether today's report has been made yet ("Report still being made" vs "Report made"); tapping a made report shows the item-by-item quantity changes and any written content. Past days show the historical record directly.
 - Admins and Managers can export reports as PDF or XLSX.
-- Exports must include: date, employee name, item name, category, and report content.
+- Exports must include: date, employee name, item name, category, and the quantity change (start → end) or report content. Every item touched in a report must be listed individually — a report covering multiple items must show all of them in the export, not a summarized count.
 
 ---
 
