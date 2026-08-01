@@ -28,14 +28,21 @@ export function formatReportDate(isoDate: string): string {
   });
 }
 
+/** "14:32" — the time a quantity snapshot was recorded, without the date. */
+export function formatSnapshotTime(isoTimestamp: string): string {
+  const parsed = new Date(isoTimestamp);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+}
+
 /** A report matches a category when any item it touched belongs to that category. */
 export function reportMatchesCategory(
   report: Report,
   items: InventoryItem[],
   category: string,
 ): boolean {
-  return report.itemChanges.some((change) => {
-    const item = items.find((candidate) => candidate.id === change.itemId);
+  return report.itemEntries.some((entry) => {
+    const item = items.find((candidate) => candidate.id === entry.itemId);
     return item?.category === category;
   });
 }

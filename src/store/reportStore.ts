@@ -4,36 +4,31 @@ import { createJSONStorage, persist } from "zustand/middleware";
 
 import { generateId } from "@/lib/id";
 import { getTodayIsoDate } from "@/lib/reports";
-import type { Report, ReportItemChange } from "@/types/inventory";
+import type { Report, ReportItemEntry } from "@/types/inventory";
 
-/**
- * Key into `dailyBaselines` — one entry per employee, calendar day and item,
- * holding that item's quantity the first time the employee touched it that day.
- */
-export function baselineKey(employeeId: string, date: string, itemId: string): string {
-  return `${employeeId}:${date}:${itemId}`;
-}
+/** One item's part of a submit — quantity and note are independent, so an
+ * item can be submitted for either, or both. */
+export type ItemSubmission = {
+  itemId: string;
+  /** Present only if this item's quantity is being recorded now. */
+  newSnapshotQuantity?: number;
+  /** Present only if this item's note was added or edited. Can be "" to
+   * explicitly clear an existing note. */
+  note?: string;
+};
 
 type ReportState = {
   reports: Report[];
-  /** Start-of-day quantities, keyed by `baselineKey`. */
-  dailyBaselines: Record<string, number>;
-  getOrCaptureBaseline: (
-    employeeId: string,
-    date: string,
-    itemId: string,
-    currentQuantity: number,
-  ) => number;
   /** Returns the report id on success, or `null` if the submission was rejected. */
   submitReport: (
-    employeeId: string,
+    reporterId: string,
     date: string,
     content: string,
-    changes: ReportItemChange[],
+    itemSubmissions: ItemSubmission[],
   ) => string | null;
-  getReportForEmployeeAndDate: (employeeId: string, date: string) => Report | undefined;
+  getReportForReporterAndDate: (reporterId: string, date: string) => Report | undefined;
   getReportsForItem: (itemId: string) => Report[];
-  getReportsForEmployee: (employeeId: string) => Report[];
+  getReportsForReporter: (reporterId: string) => Report[];
   reset: () => void;
 };
 
@@ -41,25 +36,10 @@ export const useReportStore = create<ReportState>()(
   persist(
     (set, get) => ({
       reports: [],
-      dailyBaselines: {},
-      // Must be called before the quantity actually changes, so the very first
-      // value captured for the day is the true start-of-day quantity.
-      getOrCaptureBaseline: (employeeId, date, itemId, currentQuantity) => {
-        const key = baselineKey(employeeId, date, itemId);
-        const existing = get().dailyBaselines[key];
-        if (existing !== undefined) return existing;
-
-        set((state) => ({
-          dailyBaselines: { ...state.dailyBaselines, [key]: currentQuantity },
-        }));
-        return currentQuantity;
-      },
-      // Full replace, not a merge: the caller (EmployeeReportsView) always
-      // computes the complete, current set of net changes from
-      // `dailyBaselines` vs. live quantities — so `changes` is already the
-      // whole accurate picture, every time. Merging by item id would leave
-      // stale entries behind for items an employee changed and then reverted
-      // back to their baseline.
+      // Append, not replace: `itemEntries` is the day's history, so each
+      // submit adds a snapshot to the items that actually moved and leaves
+      // every earlier snapshot in place. The caller only sends items whose
+      // quantity or note changed since the last submit.
       //
       // Rejects (returns null) rather than trusting the caller blindly:
       // - `date` must match the store's own idea of "today" — guards against
@@ -67,7 +47,7 @@ export const useReportStore = create<ReportState>()(
       //   wrong day's report.
       // - an existing report already marked `isLocked` can never be written
       //   to, regardless of what date was passed.
-      submitReport: (employeeId, date, content, changes) => {
+      submitReport: (reporterId, date, content, itemSubmissions) => {
         if (date !== getTodayIsoDate()) {
           console.warn(
             "[reportStore] Refusing to submit a report for a non-today date:",
@@ -77,7 +57,7 @@ export const useReportStore = create<ReportState>()(
         }
 
         const existing = get().reports.find(
-          (report) => report.employeeId === employeeId && report.date === date,
+          (report) => report.reporterId === reporterId && report.date === date,
         );
 
         if (existing?.isLocked) {
@@ -85,12 +65,37 @@ export const useReportStore = create<ReportState>()(
           return null;
         }
 
-        const itemChanges = changes.map((change) => ({ ...change }));
+        const now = new Date().toISOString();
+
+        function applySubmissions(entries: ReportItemEntry[]): ReportItemEntry[] {
+          const next = entries.map((entry) => ({
+            ...entry,
+            snapshots: [...entry.snapshots],
+          }));
+          for (const submission of itemSubmissions) {
+            let entry = next.find((e) => e.itemId === submission.itemId);
+            if (!entry) {
+              entry = { itemId: submission.itemId, snapshots: [], note: "" };
+              next.push(entry);
+            }
+            if (submission.newSnapshotQuantity !== undefined) {
+              entry.snapshots.push({
+                quantity: submission.newSnapshotQuantity,
+                recordedAt: now,
+              });
+            }
+            if (submission.note !== undefined) {
+              entry.note = submission.note;
+            }
+          }
+          return next;
+        }
 
         if (existing) {
+          const itemEntries = applySubmissions(existing.itemEntries);
           set((state) => ({
             reports: state.reports.map((report) =>
-              report.id === existing.id ? { ...report, content, itemChanges } : report,
+              report.id === existing.id ? { ...report, content, itemEntries } : report,
             ),
           }));
           return existing.id;
@@ -100,26 +105,33 @@ export const useReportStore = create<ReportState>()(
         set((state) => ({
           reports: [
             ...state.reports,
-            { id, employeeId, date, content, itemChanges, isLocked: false },
+            {
+              id,
+              reporterId,
+              date,
+              content,
+              itemEntries: applySubmissions([]),
+              isLocked: false,
+            },
           ],
         }));
         return id;
       },
-      getReportForEmployeeAndDate: (employeeId, date) =>
+      getReportForReporterAndDate: (reporterId, date) =>
         get().reports.find(
-          (report) => report.employeeId === employeeId && report.date === date,
+          (report) => report.reporterId === reporterId && report.date === date,
         ),
       getReportsForItem: (itemId) =>
         get()
           .reports.filter((report) =>
-            report.itemChanges.some((change) => change.itemId === itemId),
+            report.itemEntries.some((entry) => entry.itemId === itemId),
           )
           .map((report) => ({ ...report })),
-      getReportsForEmployee: (employeeId) =>
+      getReportsForReporter: (reporterId) =>
         get()
-          .reports.filter((report) => report.employeeId === employeeId)
+          .reports.filter((report) => report.reporterId === reporterId)
           .map((report) => ({ ...report })),
-      reset: () => set({ reports: [], dailyBaselines: {} }),
+      reset: () => set({ reports: [] }),
     }),
     {
       name: "report-storage",

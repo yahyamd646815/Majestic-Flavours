@@ -1,10 +1,13 @@
 import { useAuth, useUser } from "@clerk/expo";
+import { useState } from "react";
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { DevClearStorageButton } from "@/components/DevClearStorageButton";
 import { SettingsListSection } from "@/components/SettingsListSection";
+import { UnsavedChangesWarningModal } from "@/components/UnsavedChangesWarningModal";
 import { colors } from "@/constants/theme";
+import { useDraftReport } from "@/context/DraftReportContext";
 import { useInventoryStore } from "@/store/inventoryStore";
 import { useUnitsStore } from "@/store/unitsStore";
 import { parseRole } from "@/types/role";
@@ -29,6 +32,26 @@ export default function Settings() {
   const addCategory = useInventoryStore((state) => state.addCategory);
   const deleteCategory = useInventoryStore((state) => state.deleteCategory);
   const isCategoryInUse = useInventoryStore((state) => state.isCategoryInUse);
+
+  const { hasUnsavedChanges, clearDrafts } = useDraftReport();
+  const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
+
+  function handleSignOutPress() {
+    if (hasUnsavedChanges) {
+      setShowUnsavedWarning(true);
+      return;
+    }
+    // Always cleared on the way out, so the next person to sign in on this
+    // device never inherits leftover draft state.
+    clearDrafts();
+    void signOut();
+  }
+
+  function handleConfirmSignOutAnyway() {
+    setShowUnsavedWarning(false);
+    clearDrafts();
+    void signOut();
+  }
 
   function handleDeleteUnit(id: string) {
     if (isUnitInUse(id)) {
@@ -106,7 +129,7 @@ export default function Settings() {
             <TouchableOpacity
               className="btn-primary"
               activeOpacity={0.85}
-              onPress={() => void signOut()}
+              onPress={handleSignOutPress}
             >
               <Text className="btn-primary__text">Sign Out</Text>
             </TouchableOpacity>
@@ -115,6 +138,12 @@ export default function Settings() {
           </View>
         </View>
       </ScrollView>
+
+      <UnsavedChangesWarningModal
+        visible={showUnsavedWarning}
+        onCancel={() => setShowUnsavedWarning(false)}
+        onSignOutAnyway={handleConfirmSignOutAnyway}
+      />
     </SafeAreaView>
   );
 }

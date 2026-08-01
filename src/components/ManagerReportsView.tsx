@@ -16,7 +16,7 @@ import {
 } from "@/lib/reports";
 import { useInventoryStore } from "@/store/inventoryStore";
 import { useReportStore } from "@/store/reportStore";
-import type { AppUser, Report } from "@/types/inventory";
+import type { AppUser, InventoryItem, Report } from "@/types/inventory";
 
 const employees = sampleUsers.filter((user) => user.role === "employee");
 
@@ -25,50 +25,65 @@ type ManagerReportsViewProps = {
 };
 
 /**
- * Admin and Manager view. "Today" tracks which employees have reported yet;
- * past ranges list the reports themselves, one per employee per day.
+ * Admin and Manager view. "Today" tracks who has reported yet; past ranges
+ * list the reports themselves, one per reporter per day.
  */
 export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
   const items = useInventoryStore((state) => state.items);
   const categories = useInventoryStore((state) => state.categories);
   const reports = useReportStore((state) => state.reports);
-  const getReportForEmployeeAndDate = useReportStore(
-    (state) => state.getReportForEmployeeAndDate,
+  const getReportForReporterAndDate = useReportStore(
+    (state) => state.getReportForReporterAndDate,
   );
 
   const [dateFilter, setDateFilter] = useState<ReportDateFilter>("all");
-  const [employeeId, setEmployeeId] = useState<string | null>(null);
+  const [reporterId, setReporterId] = useState<string | null>(null);
   const [category, setCategory] = useState<string | null>(null);
   const [detailReportId, setDetailReportId] = useState<string | null>(null);
 
   const todayIsoDate = getTodayIsoDate();
 
+  // Today's list is every Employee (expected to report) plus any Admin or
+  // Manager who happens to have filed their own report today — not every
+  // Admin/Manager, since self-reporting is optional for them, not expected
+  // coverage the way it is for Employees.
+  const todayReporterCandidates = useMemo(() => {
+    const selfReporters = sampleUsers.filter(
+      (user) =>
+        user.role !== "employee" &&
+        getReportForReporterAndDate(user.id, todayIsoDate) !== undefined,
+    );
+    return [...employees, ...selfReporters];
+    // `reports` looks unused to the linter, but `getReportForReporterAndDate`
+    // reads it lazily through the store's `get()` — without it as a
+    // dependency this memo would not recompute when someone submits or
+    // updates today's report.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reports, getReportForReporterAndDate, todayIsoDate]);
+
   const todayRows = useMemo(
     () =>
-      employees
-        .filter((employee) => employeeId === null || employee.id === employeeId)
-        .map((employee) => ({
-          employee,
-          report: getReportForEmployeeAndDate(employee.id, todayIsoDate),
+      todayReporterCandidates
+        .filter((reporter) => reporterId === null || reporter.id === reporterId)
+        .map((reporter) => ({
+          reporter,
+          report: getReportForReporterAndDate(reporter.id, todayIsoDate),
         }))
-        // With a category filter on: an employee who has already reported
-        // stays listed only if that report touched the category. An employee
-        // who hasn't reported yet stays listed only if they're actually
-        // assigned to an item in that category — otherwise the filter would
-        // show someone with nothing to do with the selected category.
-        .filter(({ employee, report }) => {
+        // With a category filter on: someone who has already reported stays
+        // listed only if that report touched the category. An Employee who
+        // hasn't reported yet stays listed only if they're actually assigned
+        // to an item in that category. A not-yet-reported Admin/Manager
+        // never appears here at all (see todayReporterCandidates above), so
+        // there's nothing further to filter for them.
+        .filter(({ reporter, report }) => {
           if (category === null) return true;
           if (report) return reportMatchesCategory(report, items, category);
           return items.some(
             (item) =>
-              item.category === category && item.assignedEmployeeIds.includes(employee.id),
+              item.category === category && item.assignedEmployeeIds.includes(reporter.id),
           );
         }),
-    // `reports` looks unused to the linter, but the getter reads it lazily
-    // through the store's `get()` — without it as a dependency this memo would
-    // not recompute when an employee submits or updates today's report.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [reports, getReportForEmployeeAndDate, employeeId, category, items, todayIsoDate],
+    [todayReporterCandidates, getReportForReporterAndDate, reporterId, category, items, todayIsoDate],
   );
 
   const historicalReports = useMemo(
@@ -76,13 +91,13 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
       reports
         .filter((report) => {
           if (!matchesDateFilter(report.date, dateFilter, todayIsoDate)) return false;
-          if (employeeId !== null && report.employeeId !== employeeId) return false;
+          if (reporterId !== null && report.reporterId !== reporterId) return false;
           if (category !== null && !reportMatchesCategory(report, items, category)) return false;
           return true;
         })
         // Newest first.
         .sort((a, b) => b.date.localeCompare(a.date)),
-    [reports, items, dateFilter, employeeId, category, todayIsoDate],
+    [reports, items, dateFilter, reporterId, category, todayIsoDate],
   );
 
   const detailReport = reports.find((report) => report.id === detailReportId);
@@ -92,9 +107,9 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
       <ReportFilters
         dateFilter={dateFilter}
         onDateFilterChange={setDateFilter}
-        employees={employees}
-        selectedEmployeeId={employeeId}
-        onEmployeeChange={setEmployeeId}
+        reporters={sampleUsers}
+        selectedReporterId={reporterId}
+        onReporterChange={setReporterId}
         categories={categories}
         selectedCategory={category}
         onCategoryChange={setCategory}
@@ -104,17 +119,16 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
         <FlatList
           className="flex-1"
           data={todayRows}
-          keyExtractor={(row) => row.employee.id}
+          keyExtractor={(row) => row.reporter.id}
           contentContainerStyle={styles.listContent}
           ItemSeparatorComponent={() => <View className="h-3" />}
-          ListEmptyComponent={
-            <EmptyState message="No employees match these filters." />
-          }
+          ListEmptyComponent={<EmptyState message="No reporters match these filters." />}
           ListFooterComponent={footer}
           renderItem={({ item: row }) => (
-            <EmployeeTodayRow
-              employee={row.employee}
+            <ReporterTodayRow
+              reporter={row.reporter}
               report={row.report}
+              items={items}
               onPress={() => setDetailReportId(row.report?.id ?? null)}
             />
           )}
@@ -126,15 +140,13 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
           keyExtractor={(report) => report.id}
           contentContainerStyle={styles.listContent}
           ItemSeparatorComponent={() => <View className="h-3" />}
-          ListEmptyComponent={
-            <EmptyState message="No reports match these filters yet." />
-          }
+          ListEmptyComponent={<EmptyState message="No reports match these filters yet." />}
           ListFooterComponent={footer}
           renderItem={({ item: report }) => (
             <ReportCard
               report={report}
               items={items}
-              employee={sampleUsers.find((user) => user.id === report.employeeId)}
+              reporter={sampleUsers.find((user) => user.id === report.reporterId)}
               isLocked={isReportLocked(report, todayIsoDate)}
             />
           )}
@@ -145,7 +157,7 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
         visible={detailReport !== undefined}
         report={detailReport}
         items={items}
-        employee={sampleUsers.find((user) => user.id === detailReport?.employeeId)}
+        reporter={sampleUsers.find((user) => user.id === detailReport?.reporterId)}
         isLocked={detailReport ? isReportLocked(detailReport, todayIsoDate) : false}
         onClose={() => setDetailReportId(null)}
       />
@@ -153,17 +165,24 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
   );
 }
 
-type EmployeeTodayRowProps = {
-  employee: AppUser;
-  /** Undefined while the employee has not reported today. */
+/** How many touched items the row previews before collapsing the rest into "+N more". */
+const PREVIEW_LIMIT = 3;
+
+type ReporterTodayRowProps = {
+  reporter: AppUser;
+  /** Undefined while this reporter has not reported today. */
   report?: Report;
+  /** Used to resolve previewed item names and units. */
+  items: InventoryItem[];
   onPress: () => void;
 };
 
-/** One employee's status for today — tappable once their report exists. */
-function EmployeeTodayRow({ employee, report, onPress }: EmployeeTodayRowProps) {
+/** One reporter's status for today — tappable once their report exists. */
+function ReporterTodayRow({ reporter, report, items, onPress }: ReporterTodayRowProps) {
   const hasReport = report !== undefined;
-  const changeCount = report?.itemChanges.length ?? 0;
+  const entries = report?.itemEntries ?? [];
+  const previewEntries = entries.slice(0, PREVIEW_LIMIT);
+  const extraCount = entries.length - previewEntries.length;
 
   return (
     <TouchableOpacity
@@ -172,13 +191,13 @@ function EmployeeTodayRow({ employee, report, onPress }: EmployeeTodayRowProps) 
       disabled={!hasReport}
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`${employee.name}: ${
+      accessibilityLabel={`${reporter.name}: ${
         hasReport ? "report made" : "report still being made"
       }`}
     >
       <View className="flex-row items-center justify-between gap-2">
         <Text className="flex-1 font-inter-semibold text-base text-text-primary">
-          {employee.name}
+          {reporter.name}
         </Text>
 
         {hasReport ? (
@@ -202,13 +221,37 @@ function EmployeeTodayRow({ employee, report, onPress }: EmployeeTodayRowProps) 
             {hasReport ? "Report made" : "Report still being made"}
           </Text>
         </View>
-
-        {hasReport ? (
-          <Text className="font-inter text-xs text-text-secondary">
-            {changeCount} item{changeCount === 1 ? "" : "s"} changed
-          </Text>
-        ) : null}
       </View>
+
+      {hasReport ? (
+        entries.length === 0 ? (
+          <Text className="font-inter text-xs text-text-secondary">No items reported.</Text>
+        ) : (
+          <View className="gap-0.5">
+            {previewEntries.map((entry) => {
+              const item = items.find((candidate) => candidate.id === entry.itemId);
+              const latest = entry.snapshots[entry.snapshots.length - 1];
+
+              return (
+                <Text
+                  key={entry.itemId}
+                  className="font-inter text-xs text-text-secondary"
+                  numberOfLines={1}
+                >
+                  {item?.name ?? "Deleted item"}
+                  {latest ? ` — ${latest.quantity}${item ? ` ${item.unit}` : ""}` : " — note only"}
+                </Text>
+              );
+            })}
+
+            {extraCount > 0 ? (
+              <Text className="font-inter-medium text-xs text-text-secondary">
+                +{extraCount} more
+              </Text>
+            ) : null}
+          </View>
+        )
+      ) : null}
     </TouchableOpacity>
   );
 }
