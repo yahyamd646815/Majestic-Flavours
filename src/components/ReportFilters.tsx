@@ -13,21 +13,21 @@ const DATE_FILTERS: { id: ReportDateFilter; label: string }[] = [
 type ReportFiltersProps = {
   dateFilter: ReportDateFilter;
   onDateFilterChange: (filter: ReportDateFilter) => void;
-  employees: AppUser[];
-  selectedEmployeeId: string | null;
-  onEmployeeChange: (employeeId: string | null) => void;
+  reporters: AppUser[];
+  selectedReporterId: string | null;
+  onReporterChange: (reporterId: string | null) => void;
   categories: Category[];
   selectedCategory: string | null;
   onCategoryChange: (category: string | null) => void;
 };
 
-/** Date / employee / category chip filters above the Admin and Manager report list. */
+/** Date / reporter / category chip filters above the Admin and Manager report list. */
 export function ReportFilters({
   dateFilter,
   onDateFilterChange,
-  employees,
-  selectedEmployeeId,
-  onEmployeeChange,
+  reporters,
+  selectedReporterId,
+  onReporterChange,
   categories,
   selectedCategory,
   onCategoryChange,
@@ -45,18 +45,18 @@ export function ReportFilters({
         ))}
       </FilterRow>
 
-      <FilterRow label="Employee">
+      <FilterRow label="Reporter">
         <FilterChip
           label="All"
-          isActive={selectedEmployeeId === null}
-          onPress={() => onEmployeeChange(null)}
+          isActive={selectedReporterId === null}
+          onPress={() => onReporterChange(null)}
         />
-        {employees.map((employee) => (
+        {reporters.map((reporter) => (
           <FilterChip
-            key={employee.id}
-            label={employee.name}
-            isActive={selectedEmployeeId === employee.id}
-            onPress={() => onEmployeeChange(employee.id)}
+            key={reporter.id}
+            label={reporter.name}
+            isActive={selectedReporterId === reporter.id}
+            onPress={() => onReporterChange(reporter.id)}
           />
         ))}
       </FilterRow>

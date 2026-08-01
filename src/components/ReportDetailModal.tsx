@@ -9,7 +9,7 @@ type ReportDetailModalProps = {
   /** Undefined while no report is selected — the modal renders nothing then. */
   report?: Report;
   items: InventoryItem[];
-  employee?: AppUser;
+  reporter?: AppUser;
   isLocked: boolean;
   onClose: () => void;
 };
@@ -19,7 +19,7 @@ export function ReportDetailModal({
   visible,
   report,
   items,
-  employee,
+  reporter,
   isLocked,
   onClose,
 }: ReportDetailModalProps) {
@@ -36,7 +36,7 @@ export function ReportDetailModal({
               <ReportCard
                 report={report}
                 items={items}
-                employee={employee}
+                reporter={reporter}
                 isLocked={isLocked}
               />
 

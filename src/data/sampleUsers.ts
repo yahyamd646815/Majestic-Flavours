@@ -3,14 +3,14 @@ import type { AppUser } from "@/types/inventory";
 export const sampleUsers: AppUser[] = [
   {
     id: "user-1",
-    name: "Ahmed Raza",
-    email: "ahmed.raza@majesticflavors.com",
+    name: "Yahya Mohammed bin Subhan",
+    email: "yahyamd646815+admin@gmail.com",
     role: "admin",
   },
   {
     id: "user-2",
-    name: "Bilal Hussain",
-    email: "bilal.hussain@majesticflavors.com",
+    name: "Yahya bin Subhan",
+    email: "yahyamd646815+manager@gmail.com",
     role: "manager",
   },
   {

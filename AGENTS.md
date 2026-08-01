@@ -14,7 +14,7 @@ The app manages stock levels across the restaurant, with role-based access, low-
 
 Core features:
 - Three-tier role-based access: Admin, Manager, Employee
-- Inventory items with flexible units, categories, and 2 to 3 assigned employees per item
+- Inventory items with flexible units, categories, and one or more assigned employees per item (no fixed minimum or maximum)
 - Low-stock threshold alerts visible to Admins and Managers
 - Daily text-based reports submitted by employees, editable until midnight and locked after
 - Monthly report export as PDF and XLSX
@@ -343,14 +343,17 @@ Never skip or shortcut this flow for any delete action. This applies to real, us
 
 ## Report Rules
 
-- One report per employee per calendar day — not one per item. A report covers every assigned item the employee touched that day, each recorded as a start-of-day quantity and an end-of-day quantity.
-- Written content is optional. An employee can submit a report with quantity changes only, no text, or both.
-- Reports are editable (both quantities and content) until midnight on the day they were submitted, then locked permanently.
-- On submitting or updating a report, show a confirmation with an OK button, in English, Arabic, and Urdu, thanking the employee and reminding them they can still change it until the day is over.
+- One report per person per calendar day — any role can own a report (Employees report their assigned items; Admins and Managers can also file their own report, covering all items, via "+Make a report").
+- Quantity changes made while filling out a report are **drafts only** — they do not affect the shared inventory data until Report/Update Report is actually submitted. This is deliberate: an employee should be able to freely adjust steppers while working through a report without silently changing live inventory for everyone else until they've actually confirmed it.
+- Because of this, signing out while a report has unsubmitted draft changes must show a warning (in English, Arabic, and Urdu) explaining that inventory will not be updated and the changes will be lost, with the option to cancel and go back or sign out anyway.
+- Written content is optional at two levels: one overall note for the day, and a separate optional note per item.
+- Each item touched in a report keeps a timestamped history of quantity snapshots — one new entry each time Report/Update Report is submitted and that item has moved since its last recorded snapshot (not on every stepper tap, only on submission).
+- Reports are editable (quantities, notes, content) until midnight on the day they were submitted, then locked permanently.
+- On submitting or updating a report, show a confirmation with an OK button, in English, Arabic, and Urdu, thanking the person and reminding them they can still change it until the day is over.
 - Reports are automatically deleted after 4 months.
-- Admins and Managers see, per employee, whether today's report has been made yet ("Report still being made" vs "Report made"); tapping a made report shows the item-by-item quantity changes and any written content. Past days show the historical record directly.
+- Admins and Managers see, per employee, whether today's report has been made yet ("Report still being made" vs "Report made"); tapping a made report shows the item-by-item quantity history and any written content (day-level and per-item).
 - Admins and Managers can export reports as PDF or XLSX.
-- Exports must include: date, employee name, item name, category, and the quantity change (start → end) or report content. Every item touched in a report must be listed individually — a report covering multiple items must show all of them in the export, not a summarized count.
+- Exports must include: date, reporter name, item name, category, and the full quantity snapshot history (with timestamps) and any note, per item touched. Every item touched in a report must be listed individually — a report covering multiple items must show all of them in the export, not a summarized count.
 
 ---
 

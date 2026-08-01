@@ -6,6 +6,7 @@ import { StyleSheet } from "react-native";
 
 import { SplashScreen } from "@/components/SplashScreen";
 import { colors } from "@/constants/theme";
+import { DraftReportProvider } from "@/context/DraftReportContext";
 import { parseRole } from "@/types/role";
 
 const styles = StyleSheet.create({
@@ -34,66 +35,74 @@ export default function AppLayout() {
   const isAdmin = role === "admin";
 
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: colors.gold,
-        tabBarInactiveTintColor: colors.textSecondary,
-        tabBarStyle: styles.tabBar,
-      }}
-    >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: "Dashboard",
-          href: canManage ? undefined : null,
-          tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons name={focused ? "home" : "home-outline"} color={color} size={size} />
-          ),
+    // Above the tabs: Reports writes report drafts, Settings reads them to
+    // warn before signing out with unsubmitted changes.
+    <DraftReportProvider>
+      <Tabs
+        screenOptions={{
+          headerShown: false,
+          tabBarActiveTintColor: colors.gold,
+          tabBarInactiveTintColor: colors.textSecondary,
+          tabBarStyle: styles.tabBar,
         }}
-      />
-      <Tabs.Screen
-        name="inventory"
-        options={{
-          title: "Inventory",
-          href: canManage ? undefined : null,
-          tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons name={focused ? "cube" : "cube-outline"} color={color} size={size} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="reports"
-        options={{
-          title: "Reports",
-          tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons
-              name={focused ? "document-text" : "document-text-outline"}
-              color={color}
-              size={size}
-            />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="users"
-        options={{
-          title: "Users",
-          href: isAdmin ? undefined : null,
-          tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons name={focused ? "people" : "people-outline"} color={color} size={size} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="settings"
-        options={{
-          title: "Settings",
-          tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons name={focused ? "settings" : "settings-outline"} color={color} size={size} />
-          ),
-        }}
-      />
-    </Tabs>
+      >
+        <Tabs.Screen
+          name="index"
+          options={{
+            title: "Dashboard",
+            href: canManage ? undefined : null,
+            tabBarIcon: ({ color, size, focused }) => (
+              <Ionicons name={focused ? "home" : "home-outline"} color={color} size={size} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="inventory"
+          options={{
+            title: "Inventory",
+            href: canManage ? undefined : null,
+            tabBarIcon: ({ color, size, focused }) => (
+              <Ionicons name={focused ? "cube" : "cube-outline"} color={color} size={size} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="reports"
+          options={{
+            title: "Reports",
+            tabBarIcon: ({ color, size, focused }) => (
+              <Ionicons
+                name={focused ? "document-text" : "document-text-outline"}
+                color={color}
+                size={size}
+              />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="users"
+          options={{
+            title: "Users",
+            href: isAdmin ? undefined : null,
+            tabBarIcon: ({ color, size, focused }) => (
+              <Ionicons name={focused ? "people" : "people-outline"} color={color} size={size} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="settings"
+          options={{
+            title: "Settings",
+            tabBarIcon: ({ color, size, focused }) => (
+              <Ionicons
+                name={focused ? "settings" : "settings-outline"}
+                color={color}
+                size={size}
+              />
+            ),
+          }}
+        />
+      </Tabs>
+    </DraftReportProvider>
   );
 }

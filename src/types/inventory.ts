@@ -21,20 +21,28 @@ export type InventoryItem = {
   createdAt: string;
 };
 
-/** One assigned item an employee touched during a reported day. */
-export type ReportItemChange = {
-  itemId: string;
-  startQuantity: number;
-  endQuantity: number;
+export type ReportItemSnapshot = {
+  quantity: number;
+  recordedAt: string; // ISO timestamp
 };
 
-/** One report per employee per calendar day, covering every item they touched. */
+/** One item touched in a report: its optional note, and its chronological,
+ * append-only quantity history. */
+export type ReportItemEntry = {
+  itemId: string;
+  snapshots: ReportItemSnapshot[];
+  note: string; // "" = no note. Independent of quantity.
+};
+
+/** One report per person per calendar day. `reporterId` — not `employeeId`
+ * — because Admin and Manager can now also own a report (self-reporting via
+ * "+Make a report"). */
 export type Report = {
   id: string;
-  employeeId: string;
+  reporterId: string;
   date: string; // YYYY-MM-DD
   content: string; // "" is valid — written content is optional
-  itemChanges: ReportItemChange[];
+  itemEntries: ReportItemEntry[];
   isLocked: boolean;
 };
 
