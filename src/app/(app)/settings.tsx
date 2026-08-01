@@ -36,21 +36,29 @@ export default function Settings() {
   const { hasUnsavedChanges, clearDrafts } = useDraftReport();
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
 
+  async function performSignOut() {
+    try {
+      await signOut();
+    } catch {
+      Alert.alert("Sign out failed", "Please check your connection and try again.");
+      return;
+    }
+    // Cleared only after a successful sign-out, so the next person to sign in
+    // on this device never inherits leftover draft state.
+    clearDrafts();
+  }
+
   function handleSignOutPress() {
     if (hasUnsavedChanges) {
       setShowUnsavedWarning(true);
       return;
     }
-    // Always cleared on the way out, so the next person to sign in on this
-    // device never inherits leftover draft state.
-    clearDrafts();
-    void signOut();
+    void performSignOut();
   }
 
   function handleConfirmSignOutAnyway() {
     setShowUnsavedWarning(false);
-    clearDrafts();
-    void signOut();
+    void performSignOut();
   }
 
   function handleDeleteUnit(id: string) {

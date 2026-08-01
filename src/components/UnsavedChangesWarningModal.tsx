@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import { colors, spacing } from "@/constants/theme";
 
@@ -13,6 +13,10 @@ type UnsavedChangesWarningModalProps = {
  * Shown when someone signs out with report changes they never submitted. A
  * custom Modal rather than a native Alert because the three language blocks
  * need real layout — and Arabic and Urdu need their own writing direction.
+ *
+ * The message body is scrollable (not the header or buttons) so that at
+ * large system font sizes the three stacked languages can't push Cancel /
+ * Sign Out Anyway off-screen and out of reach.
  */
 export function UnsavedChangesWarningModal({
   visible,
@@ -28,7 +32,7 @@ export function UnsavedChangesWarningModal({
             <Text className="font-inter-bold text-base text-maroon">Unsaved Changes</Text>
           </View>
 
-          <View className="gap-3">
+          <ScrollView contentContainerStyle={styles.messages}>
             <Text className="font-inter text-sm text-text-primary">
               You have unsaved changes that haven&apos;t been reported. Signing out now will
               discard them — your inventory will not be updated. Are you sure you want to sign
@@ -52,10 +56,10 @@ export function UnsavedChangesWarningModal({
               style={{ writingDirection: "rtl" }}
             >
               آپ کے پاس غیر محفوظ شدہ تبدیلیاں ہیں جو رپورٹ نہیں کی گئیں۔ ابھی سائن آؤٹ کرنے سے وہ
-              ضائع ہو جائیں گی - آپ کی انوینٹری اپ ڈیٹ نہیں ہوگی۔ کیا آپ واقعی سائن آؤٹ کرنا چاہتے
+              ضائع ہو جائیں گی - آپ کی انوینٹری اپڈیٹ نہیں ہوگی۔ کیا آپ واقعی سائن آؤٹ کرنا چاہتے
               ہیں؟
             </Text>
-          </View>
+          </ScrollView>
 
           <View className="gap-2">
             <TouchableOpacity className="btn-primary" activeOpacity={0.85} onPress={onCancel}>
@@ -82,5 +86,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "rgba(0,0,0,0.5)",
     padding: spacing.lg,
+  },
+  messages: {
+    gap: spacing.sm,
   },
 });
