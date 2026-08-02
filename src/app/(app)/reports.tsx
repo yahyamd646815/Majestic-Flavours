@@ -37,18 +37,11 @@ export default function Reports() {
   const reportsError = useReportStore((state) => state.error);
   const fetchReports = useReportStore((state) => state.fetchAll);
 
-  // Who owns the report: the real Clerk id, which is what Supabase stores and
-  // what RLS checks. Always present for a signed-in user — the guard is only
-  // there because Clerk types it as optional.
   const reporterId = user?.id ?? null;
 
-  // Which items an Employee reports on is still keyed on placeholder
-  // `sampleUsers` ids (`assignedEmployeeIds`), so that side keeps the
-  // email bridge until 13d replaces the placeholder users for good.
   const currentEmail = user?.primaryEmailAddress?.emailAddress;
   const currentSampleUser = sampleUsers.find((sampleUser) => sampleUser.email === currentEmail);
 
-  // Admin/Manager only: swaps the browsing view for their own report entry.
   const [isSelfReporting, setIsSelfReporting] = useState(false);
 
   const assignedItems = useMemo(
@@ -62,8 +55,12 @@ export default function Reports() {
   const footer = <View className="pt-6" />;
 
   const combinedError = error ?? unitsError ?? reportsError;
+  // Each store's own empty-state is checked independently — combining them
+  // with a single shared "items.length === 0" check let the reports fetch
+  // finish invisibly after inventory resolved first, showing "Report"
+  // instead of "Update Report" for a day already reported.
   const isEmptyAndLoading =
-    (isLoading || unitsLoading || reportsLoading) && items.length === 0;
+    (isLoading && items.length === 0) || unitsLoading || reportsLoading;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.white }}>
@@ -128,11 +125,6 @@ export default function Reports() {
           ) : null}
         </View>
 
-        {/* Inventory, units AND reports all have to be loaded before any of
-            this is meaningful — an employee would otherwise be told they have
-            no assigned items, see blank unit labels, or be shown an empty
-            "Report" button for a day they have already reported, while a
-            fetch is still in flight. */}
         {combinedError !== null ? (
           <ErrorState
             message={combinedError}
@@ -145,7 +137,6 @@ export default function Reports() {
         ) : isEmptyAndLoading ? (
           <LoadingState />
         ) : canViewAllReports ? (
-          // Admins and Managers report on every item, not just assigned ones.
           isSelfReporting && reporterId !== null ? (
             <ReportEntryView reporterId={reporterId} items={items} />
           ) : (

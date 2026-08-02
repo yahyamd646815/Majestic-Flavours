@@ -5,8 +5,6 @@ import { generateId } from "@/lib/id";
 import { getTodayIsoDate } from "@/lib/reports";
 import type { Report, ReportItemEntry } from "@/types/inventory";
 
-/** A report and its two child tables arrive as one nested row — same loose
- * raw-row typing, narrowed in one place, as `inventoryStore`'s mapper. */
 function mapDbReportToReport(row: Record<string, unknown>): Report {
   const entryRows = (row.report_item_entries as Record<string, unknown>[] | null) ?? [];
 
@@ -17,9 +15,6 @@ function mapDbReportToReport(row: Record<string, unknown>): Report {
     return {
       itemId: entryRow.item_id as string,
       note: entryRow.note as string,
-      // Nested relations aren't guaranteed to come back in insertion order —
-      // sort explicitly, since the "latest" snapshot the UI shows is simply
-      // the last element of this array.
       snapshots: snapshotRows
         .map((snapshotRow) => ({
           quantity: snapshotRow.quantity as number,
@@ -39,30 +34,16 @@ function mapDbReportToReport(row: Record<string, unknown>): Report {
   };
 }
 
-/** The nested select used for both the full fetch and the post-write refetch. */
 const REPORT_SELECT = "*, report_item_entries(*, report_item_snapshots(*))";
 
-/** One item's part of a submit — quantity and note are independent, so an
- * item can be submitted for either, or both. */
 export type ItemSubmission = {
   itemId: string;
-  /** Present only if this item's quantity is being recorded now. */
   newSnapshotQuantity?: number;
-  /** Present only if this item's note was added or edited. Can be "" to
-   * explicitly clear an existing note. */
   note?: string;
 };
 
-/** `failedItemIds` lets the caller tell the user exactly which items didn't
- * fully save, without needing an all-or-nothing rollback (Supabase REST
- * calls aren't transactional across tables the way a single Postgres
- * function would be — same partial-failure philosophy already used for the
- * inventory write phase in `ReportEntryView`). `null` means the report
- * itself was rejected and nothing was written at all. */
 export type SubmitReportResult = { reportId: string; failedItemIds: string[] } | null;
 
-/** An in-memory cache of whatever Supabase last returned — see the longer
- * note in `inventoryStore`. Deliberately not persisted. */
 type ReportState = {
   reports: Report[];
   isLoading: boolean;
@@ -104,16 +85,6 @@ export const useReportStore = create<ReportState>()((set, get) => ({
     });
   },
 
-  // Append, not replace: each item's snapshots are the day's history, so a
-  // submit adds one snapshot to the items that actually moved and leaves
-  // every earlier snapshot in place. The caller only sends items whose
-  // quantity or note changed since the last submit.
-  //
-  // Rejects (returns null) rather than trusting the caller blindly:
-  // - `date` must match the store's own idea of "today" — guards against a UI
-  //   that went stale across a midnight rollover writing into the wrong day.
-  // - an existing report already marked `isLocked` can never be written to.
-  // Supabase's RLS policies enforce both again server-side.
   submitReport: async (supabase, reporterId, date, content, itemSubmissions) => {
     if (date !== getTodayIsoDate()) {
       console.warn("[reportStore] Refusing to submit a report for a non-today date:", date);
@@ -144,21 +115,12 @@ export const useReportStore = create<ReportState>()((set, get) => ({
       const existingEntry = existing?.itemEntries.find(
         (entry) => entry.itemId === submission.itemId,
       );
-      // Only overwrite `note` when this submission actually includes one —
-      // otherwise a quantity-only submission would silently blank out an
-      // already-saved note. Fall back to whatever's already there.
       const noteToWrite = submission.note ?? existingEntry?.note ?? "";
 
       const { data: entryData, error: entryError } = await supabase
         .from("report_item_entries")
         .upsert(
           {
-            // Derived from the row's natural key, not randomly generated:
-            // this upsert conflicts on (report_id, item_id) and writes back
-            // every column it is given, `id` included. A fresh id here would
-            // rewrite the entry's primary key on every update — and once that
-            // entry has snapshots pointing at the old id, the foreign key
-            // rejects the write outright.
             id: `entry-${reportId}-${submission.itemId}`,
             report_id: reportId,
             item_id: submission.itemId,
@@ -184,9 +146,6 @@ export const useReportStore = create<ReportState>()((set, get) => ({
       }
     }
 
-    // Re-fetch this one report rather than trying to hand-merge the partial
-    // writes above into local state — simpler, and guarantees local state
-    // matches exactly what's actually in the database after a partial failure.
     const { data: refetched } = await supabase
       .from("reports")
       .select(REPORT_SELECT)
@@ -195,8 +154,11 @@ export const useReportStore = create<ReportState>()((set, get) => ({
 
     if (refetched) {
       const updated = mapDbReportToReport(refetched as Record<string, unknown>);
+      // Keyed on the current state at merge time, not the `existing` value
+      // captured before the write — a cache miss earlier shouldn't be able
+      // to produce a duplicate entry for the same report id here.
       set((state) => ({
-        reports: existing
+        reports: state.reports.some((report) => report.id === reportId)
           ? state.reports.map((report) => (report.id === reportId ? updated : report))
           : [...state.reports, updated],
       }));
@@ -206,14 +168,10 @@ export const useReportStore = create<ReportState>()((set, get) => ({
   },
 
   getReportForReporterAndDate: (reporterId, date) =>
-    get().reports.find(
-      (report) => report.reporterId === reporterId && report.date === date,
-    ),
+    get().reports.find((report) => report.reporterId === reporterId && report.date === date),
   getReportsForItem: (itemId) =>
     get()
-      .reports.filter((report) =>
-        report.itemEntries.some((entry) => entry.itemId === itemId),
-      )
+      .reports.filter((report) => report.itemEntries.some((entry) => entry.itemId === itemId))
       .map((report) => ({ ...report })),
   getReportsForReporter: (reporterId) =>
     get()

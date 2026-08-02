@@ -1,23 +1,21 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { create } from "zustand";
 
-/** One row of `app_users` — the Clerk directory mirrored into Supabase so the
- * app can show a real name next to a real Clerk id. Role deliberately lives
- * only in Clerk (see AGENTS.md), so it is not part of this shape. */
 export type SyncedUser = {
   clerkUserId: string;
   name: string;
   email: string;
 };
 
-/** Same in-memory-cache contract as `inventoryStore` — see the note there. */
 type AppUsersState = {
   users: SyncedUser[];
   isLoading: boolean;
   error: string | null;
+  /** True once THIS session's own `app_users` row is confirmed written —
+   * submitting a report before this is true risks a foreign-key violation,
+   * since `reports.reporter_id` references `app_users`. */
+  selfSynced: boolean;
   fetchAll: (supabase: SupabaseClient) => Promise<void>;
-  /** Upserts the current signed-in user's own row — call once per sign-in
-   * so `app_users` grows organically as real people actually use the app. */
   syncSelf: (
     supabase: SupabaseClient,
     self: { clerkUserId: string; name: string; email: string },
@@ -28,6 +26,7 @@ export const useAppUsersStore = create<AppUsersState>()((set) => ({
   users: [],
   isLoading: true,
   error: null,
+  selfSynced: false,
 
   fetchAll: async (supabase) => {
     set({ isLoading: true, error: null });
@@ -62,12 +61,12 @@ export const useAppUsersStore = create<AppUsersState>()((set) => ({
       return;
     }
 
-    // Reflect it locally too, without waiting for a full refetch.
     set((state) => ({
       users: [
         ...state.users.filter((user) => user.clerkUserId !== self.clerkUserId),
         { clerkUserId: self.clerkUserId, name: self.name, email: self.email },
       ],
+      selfSynced: true,
     }));
   },
 }));
