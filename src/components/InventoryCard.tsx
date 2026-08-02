@@ -3,16 +3,27 @@ import { Text, TouchableOpacity, View } from "react-native";
 
 import { colors } from "@/constants/theme";
 import { getAssignedNames } from "@/lib/getAssignedNames";
-import type { InventoryItem } from "@/types/inventory";
+import { getCategoryName, getUnitLabel } from "@/lib/inventoryLabels";
+import type { Category, InventoryItem, Unit } from "@/types/inventory";
 
 type InventoryCardProps = {
   item: InventoryItem;
+  /** Needed to resolve the item's `categoryId` / `unitId` into display text. */
+  categories: Category[];
+  units: Unit[];
   canDelete: boolean;
   onEdit: () => void;
   onDelete: () => void;
 };
 
-export function InventoryCard({ item, canDelete, onEdit, onDelete }: InventoryCardProps) {
+export function InventoryCard({
+  item,
+  categories,
+  units,
+  canDelete,
+  onEdit,
+  onDelete,
+}: InventoryCardProps) {
   const isOutOfStock = item.currentQuantity === 0;
   const isLowStock = !isOutOfStock && item.currentQuantity <= item.minThreshold;
 
@@ -29,13 +40,15 @@ export function InventoryCard({ item, canDelete, onEdit, onDelete }: InventoryCa
   const statusLabel = isOutOfStock ? "Out of Stock" : isLowStock ? "Low Stock" : "In Stock";
 
   const assignedNames = getAssignedNames(item.assignedEmployeeIds);
+  const categoryName = getCategoryName(categories, item.categoryId);
+  const unitLabel = getUnitLabel(units, item.unitId);
 
   return (
     <View className="card gap-3">
       <View className="flex-row items-start justify-between gap-2">
         <View className="flex-1">
           <Text className="font-inter-semibold text-base text-text-primary">{item.name}</Text>
-          <Text className="font-inter text-xs text-text-secondary">{item.category}</Text>
+          <Text className="font-inter text-xs text-text-secondary">{categoryName}</Text>
         </View>
         <View className={badgeClass}>
           <Text className={badgeTextClass}>{statusLabel}</Text>
@@ -43,7 +56,7 @@ export function InventoryCard({ item, canDelete, onEdit, onDelete }: InventoryCa
       </View>
 
       <Text className="font-inter text-sm text-text-primary">
-        {item.currentQuantity} {item.unit}
+        {item.currentQuantity} {unitLabel}
       </Text>
 
       {assignedNames.length > 0 ? (

@@ -2,20 +2,30 @@ import { Ionicons } from "@expo/vector-icons";
 import { Text, View } from "react-native";
 
 import { colors } from "@/constants/theme";
+import { getCategoryName, getUnitLabel } from "@/lib/inventoryLabels";
 import { formatReportDate, formatSnapshotTime } from "@/lib/reports";
-import type { AppUser, InventoryItem, Report } from "@/types/inventory";
+import type { AppUser, Category, InventoryItem, Report, Unit } from "@/types/inventory";
 
 type ReportCardProps = {
   report: Report;
   /** Used to resolve each entry's item name, category and unit. */
   items: InventoryItem[];
+  categories: Category[];
+  units: Unit[];
   /** Undefined when the report's author is no longer in the user list. */
   reporter?: AppUser;
   isLocked: boolean;
 };
 
 /** One person's report for one day, as seen by Admins and Managers. */
-export function ReportCard({ report, items, reporter, isLocked }: ReportCardProps) {
+export function ReportCard({
+  report,
+  items,
+  categories,
+  units,
+  reporter,
+  isLocked,
+}: ReportCardProps) {
   return (
     <View className="card gap-3">
       <View className="flex-row items-start justify-between gap-2">
@@ -54,14 +64,14 @@ export function ReportCard({ report, items, reporter, isLocked }: ReportCardProp
                       {item?.name ?? "Deleted item"}
                     </Text>
                     <Text className="font-inter text-xs text-text-secondary">
-                      {item?.category ?? "No category"}
+                      {item ? getCategoryName(categories, item.categoryId) : "No category"}
                     </Text>
                   </View>
 
                   {latest ? (
                     <Text className="font-inter-semibold text-sm text-text-primary">
                       {latest.quantity}
-                      {item ? ` ${item.unit}` : ""}
+                      {item ? ` ${getUnitLabel(units, item.unitId)}` : ""}
                     </Text>
                   ) : null}
                 </View>

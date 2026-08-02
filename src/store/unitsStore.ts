@@ -1,67 +1,77 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { create } from "zustand";
-import { createJSONStorage, persist } from "zustand/middleware";
 
-import { units as seedUnits } from "@/data/units";
 import { generateId, slugify } from "@/lib/id";
 import { useInventoryStore } from "@/store/inventoryStore";
 import type { Unit } from "@/types/inventory";
 
+/** Same in-memory-cache contract as `inventoryStore` — see the note there.
+ * The `units` table needs no snake_case translation: `id` / `label` map
+ * straight across. */
 type UnitsState = {
   units: Unit[];
-  addUnit: (label: string) => boolean;
-  isUnitInUse: (id: string) => boolean;
-  deleteUnit: (id: string) => boolean;
-  reset: () => void;
+  isLoading: boolean;
+  error: string | null;
+  fetchAll: (supabase: SupabaseClient) => Promise<void>;
+  addUnit: (supabase: SupabaseClient, label: string) => Promise<boolean>;
+  isUnitInUse: (unitId: string) => boolean;
+  deleteUnit: (supabase: SupabaseClient, id: string) => Promise<boolean>;
 };
 
-export const useUnitsStore = create<UnitsState>()(
-  persist(
-    (set, get) => ({
-      units: seedUnits,
-      addUnit: (label) => {
-        const trimmedLabel = label.trim();
-        if (trimmedLabel.length === 0) return false;
+export const useUnitsStore = create<UnitsState>()((set, get) => ({
+  units: [],
+  isLoading: true,
+  error: null,
 
-        const isDuplicate = get().units.some(
-          (unit) => unit.label.toLowerCase() === trimmedLabel.toLowerCase(),
-        );
-        if (isDuplicate) return false;
+  fetchAll: async (supabase) => {
+    set({ isLoading: true, error: null });
+    const { data, error } = await supabase.from("units").select("*");
 
-        const slug = slugify(trimmedLabel);
-        const idTaken = get().units.some((unit) => unit.id === slug);
-        const id = slug.length === 0 || idTaken ? generateId("unit") : slug;
+    if (error) {
+      set({
+        isLoading: false,
+        error: "Could not load units. Check your connection and try again.",
+      });
+      return;
+    }
 
-        set((state) => ({
-          units: [...state.units, { id, label: trimmedLabel }],
-        }));
-        return true;
-      },
-      // Items link to units by label, not id — item.unit stores the label
-      // string (e.g. "kg"), so look the unit up first.
-      isUnitInUse: (id) => {
-        const unit = get().units.find((u) => u.id === id);
-        if (!unit) return false;
-        return useInventoryStore
-          .getState()
-          .items.some((item) => item.unit === unit.label);
-      },
-      deleteUnit: (id) => {
-        if (get().isUnitInUse(id)) return false;
+    set({ units: (data ?? []) as Unit[], isLoading: false, error: null });
+  },
 
-        const exists = get().units.some((unit) => unit.id === id);
-        if (!exists) return false;
+  addUnit: async (supabase, label) => {
+    const trimmedLabel = label.trim();
+    if (trimmedLabel.length === 0) return false;
 
-        set((state) => ({
-          units: state.units.filter((unit) => unit.id !== id),
-        }));
-        return true;
-      },
-      reset: () => set({ units: seedUnits }),
-    }),
-    {
-      name: "units-storage",
-      storage: createJSONStorage(() => AsyncStorage),
-    },
-  ),
-);
+    const isDuplicate = get().units.some(
+      (unit) => unit.label.toLowerCase() === trimmedLabel.toLowerCase(),
+    );
+    if (isDuplicate) return false;
+
+    const slug = slugify(trimmedLabel);
+    const idTaken = get().units.some((unit) => unit.id === slug);
+    const id = slug.length === 0 || idTaken ? generateId("unit") : slug;
+
+    const { data, error } = await supabase
+      .from("units")
+      .insert({ id, label: trimmedLabel })
+      .select()
+      .single();
+
+    if (error || !data) return false;
+    set((state) => ({ units: [...state.units, data as Unit] }));
+    return true;
+  },
+
+  // A direct id comparison now that items carry `unitId`. Still a small
+  // cross-store read, as before.
+  isUnitInUse: (unitId) =>
+    useInventoryStore.getState().items.some((item) => item.unitId === unitId),
+
+  deleteUnit: async (supabase, id) => {
+    if (get().isUnitInUse(id)) return false;
+    const { error } = await supabase.from("units").delete().eq("id", id);
+    if (error) return false;
+    set((state) => ({ units: state.units.filter((unit) => unit.id !== id) }));
+    return true;
+  },
+}));

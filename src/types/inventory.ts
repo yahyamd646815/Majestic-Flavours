@@ -10,12 +10,15 @@ export type Unit = {
   label: string;
 };
 
+/** `categoryId` / `unitId` are real foreign keys into `categories` / `units`
+ * (matching the Supabase schema). They replaced the display-name strings the
+ * app used before — resolve them to text with `@/lib/inventoryLabels`. */
 export type InventoryItem = {
   id: string;
   name: string;
-  category: string;
+  categoryId: string;
   currentQuantity: number;
-  unit: string;
+  unitId: string;
   minThreshold: number;
   assignedEmployeeIds: string[];
   createdAt: string;

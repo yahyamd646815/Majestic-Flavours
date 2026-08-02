@@ -12,8 +12,9 @@ export type SettingsListItem = {
 type SettingsListSectionProps = {
   title: string;
   items: SettingsListItem[];
-  /** Returns `false` when the store rejected the add (e.g. a duplicate name). */
-  onAdd: (label: string) => boolean;
+  /** Resolves `false` when the add was rejected — a duplicate name, or a
+   * failed write to Supabase. */
+  onAdd: (label: string) => Promise<boolean>;
   onDelete: (id: string) => void;
   canDelete?: boolean;
 };
@@ -27,14 +28,18 @@ export function SettingsListSection({
 }: SettingsListSectionProps) {
   const [label, setLabel] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [isAdding, setIsAdding] = useState(false);
 
-  function handleAdd() {
+  async function handleAdd() {
     const trimmed = label.trim();
-    if (trimmed.length === 0) return;
+    if (trimmed.length === 0 || isAdding) return;
 
-    const success = onAdd(trimmed);
+    setIsAdding(true);
+    const success = await onAdd(trimmed);
+    setIsAdding(false);
+
     if (!success) {
-      setError(`"${trimmed}" already exists.`);
+      setError(`Could not add "${trimmed}". It may already exist, or the save failed.`);
       return;
     }
 
@@ -86,13 +91,20 @@ export function SettingsListSection({
             accessibilityLabel={`New ${title.toLowerCase()} name`}
           />
           <TouchableOpacity
-            className="items-center justify-center rounded-lg bg-gold px-4"
+            className={
+              isAdding
+                ? "items-center justify-center rounded-lg bg-gold px-4 opacity-50"
+                : "items-center justify-center rounded-lg bg-gold px-4"
+            }
             activeOpacity={0.85}
-            onPress={handleAdd}
+            disabled={isAdding}
+            onPress={() => void handleAdd()}
             accessibilityRole="button"
             accessibilityLabel={`Add ${title.toLowerCase()}`}
           >
-            <Text className="font-inter-semibold text-sm text-text-primary">Add</Text>
+            <Text className="font-inter-semibold text-sm text-text-primary">
+              {isAdding ? "Adding..." : "Add"}
+            </Text>
           </TouchableOpacity>
         </View>
 

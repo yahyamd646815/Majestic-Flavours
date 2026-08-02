@@ -17,8 +17,9 @@ type ReportFiltersProps = {
   selectedReporterId: string | null;
   onReporterChange: (reporterId: string | null) => void;
   categories: Category[];
-  selectedCategory: string | null;
-  onCategoryChange: (category: string | null) => void;
+  /** `null` means "All". Otherwise a `Category.id`. */
+  selectedCategoryId: string | null;
+  onCategoryChange: (categoryId: string | null) => void;
 };
 
 /** Date / reporter / category chip filters above the Admin and Manager report list. */
@@ -29,7 +30,7 @@ export function ReportFilters({
   selectedReporterId,
   onReporterChange,
   categories,
-  selectedCategory,
+  selectedCategoryId,
   onCategoryChange,
 }: ReportFiltersProps) {
   return (
@@ -64,15 +65,15 @@ export function ReportFilters({
       <FilterRow label="Category">
         <FilterChip
           label="All"
-          isActive={selectedCategory === null}
+          isActive={selectedCategoryId === null}
           onPress={() => onCategoryChange(null)}
         />
         {categories.map((category) => (
           <FilterChip
             key={category.id}
             label={category.name}
-            isActive={selectedCategory === category.name}
-            onPress={() => onCategoryChange(category.name)}
+            isActive={selectedCategoryId === category.id}
+            onPress={() => onCategoryChange(category.id)}
           />
         ))}
       </FilterRow>

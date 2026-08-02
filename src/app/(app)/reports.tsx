@@ -4,10 +4,13 @@ import { useMemo, useState } from "react";
 import { Alert, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { ErrorState } from "@/components/ErrorState";
+import { LoadingState } from "@/components/LoadingState";
 import { ManagerReportsView } from "@/components/ManagerReportsView";
 import { ReportEntryView } from "@/components/ReportEntryView";
 import { colors } from "@/constants/theme";
 import { sampleUsers } from "@/data/sampleUsers";
+import { useSupabaseClient } from "@/lib/supabase";
 import { useInventoryStore } from "@/store/inventoryStore";
 import { parseRole } from "@/types/role";
 
@@ -20,7 +23,11 @@ export default function Reports() {
   const role = parseRole(user?.publicMetadata?.role);
   const canViewAllReports = role === "admin" || role === "manager";
 
+  const supabase = useSupabaseClient();
   const items = useInventoryStore((state) => state.items);
+  const isLoading = useInventoryStore((state) => state.isLoading);
+  const error = useInventoryStore((state) => state.error);
+  const fetchAll = useInventoryStore((state) => state.fetchAll);
 
   // Clerk accounts are not linked to `sampleUsers` yet, so bridge the two by
   // email — `sampleUsers` ids are what inventory and reports are keyed on.
@@ -107,7 +114,14 @@ export default function Reports() {
           ) : null}
         </View>
 
-        {canViewAllReports ? (
+        {/* Inventory has to be loaded before any of this is meaningful — an
+            employee would otherwise be told they have no assigned items while
+            the fetch is still in flight. */}
+        {error !== null ? (
+          <ErrorState message={error} onRetry={() => void fetchAll(supabase)} />
+        ) : isLoading && items.length === 0 ? (
+          <LoadingState />
+        ) : canViewAllReports ? (
           // Admins and Managers report on every item, not just assigned ones.
           isSelfReporting && currentSampleUser ? (
             <ReportEntryView reporterId={currentSampleUser.id} items={items} />

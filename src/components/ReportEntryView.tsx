@@ -9,9 +9,11 @@ import { SearchBar } from "@/components/SearchBar";
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { useDraftReport } from "@/context/DraftReportContext";
 import { getTodayIsoDate, isReportLocked } from "@/lib/reports";
+import { useSupabaseClient } from "@/lib/supabase";
 import { useInventoryStore } from "@/store/inventoryStore";
 import { useReportStore, type ItemSubmission } from "@/store/reportStore";
-import type { Category, InventoryItem } from "@/types/inventory";
+import { useUnitsStore } from "@/store/unitsStore";
+import type { InventoryItem } from "@/types/inventory";
 
 type ReportEntryViewProps = {
   /** The reporter's `sampleUsers` id — an Employee, or an Admin/Manager self-reporting. */
@@ -31,7 +33,10 @@ type ReportEntryViewProps = {
 export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
   const todayIsoDate = getTodayIsoDate();
 
+  const supabase = useSupabaseClient();
   const updateItem = useInventoryStore((state) => state.updateItem);
+  const allCategories = useInventoryStore((state) => state.categories);
+  const units = useUnitsStore((state) => state.units);
   const submitReport = useReportStore((state) => state.submitReport);
   // Called as a selector so the view re-renders when today's report is created
   // or updated — the getter returns the stored report by reference, so this
@@ -45,9 +50,9 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
 
   const [showConfirmation, setShowConfirmation] = useState(false);
   // Local to this screen — the Admin/Manager Inventory screen owns
-  // inventoryStore.selectedCategory, and sharing it would let the two
+  // inventoryStore.selectedCategoryId, and sharing it would let the two
   // screens' filters interfere with each other.
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [dayContent, setDayContent] = useState(todaysReport?.content ?? "");
 
@@ -63,25 +68,24 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
 
   const isLocked = todaysReport ? isReportLocked(todaysReport, todayIsoDate) : false;
 
-  const categories = useMemo<Category[]>(() => {
-    const seen = new Set<string>();
-    const result: Category[] = [];
-    for (const item of items) {
-      if (seen.has(item.category)) continue;
-      seen.add(item.category);
-      result.push({ id: item.category, name: item.category });
-    }
-    return result;
-  }, [items]);
+  // Only the categories actually represented in this person's items — an
+  // employee assigned to Dairy and Meat shouldn't see every global category.
+  // Real `{id, name}` pairs now, resolved from the store rather than faked
+  // from the old name string.
+  const visibleCategories = useMemo(() => {
+    const presentIds = new Set(items.map((item) => item.categoryId));
+    return allCategories.filter((category) => presentIds.has(category.id));
+  }, [items, allCategories]);
 
   const filteredItems = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return items.filter((item) => {
-      const matchesCategory = selectedCategory === null || item.category === selectedCategory;
+      const matchesCategory =
+        selectedCategoryId === null || item.categoryId === selectedCategoryId;
       const matchesQuery = query.length === 0 || item.name.toLowerCase().includes(query);
       return matchesCategory && matchesQuery;
     });
-  }, [items, selectedCategory, searchQuery]);
+  }, [items, selectedCategoryId, searchQuery]);
 
   const entriesByItemId = useMemo(
     () => new Map((todaysReport?.itemEntries ?? []).map((entry) => [entry.itemId, entry])),
@@ -103,7 +107,7 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
     setDraftQuantity(item.id, Math.max(0, nextQuantity));
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     const itemSubmissions: ItemSubmission[] = [];
 
     for (const item of items) {
@@ -133,14 +137,32 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
       return;
     }
 
-    // Only now do the actual quantities land in inventoryStore.
-    for (const submission of itemSubmissions) {
-      if (submission.newSnapshotQuantity !== undefined) {
-        updateItem(submission.itemId, { currentQuantity: submission.newSnapshotQuantity });
-      }
-    }
+    // Only now do the actual quantities land in Supabase.
+    const quantityUpdates = itemSubmissions.flatMap((submission) =>
+      submission.newSnapshotQuantity === undefined
+        ? []
+        : [{ itemId: submission.itemId, quantity: submission.newSnapshotQuantity }],
+    );
+
+    const writeResults = await Promise.all(
+      quantityUpdates.map((update) =>
+        updateItem(supabase, update.itemId, { currentQuantity: update.quantity }),
+      ),
+    );
 
     clearDrafts();
+
+    // The report itself is stored locally until 13c, so it is already saved
+    // even when the inventory writes fail — say so plainly rather than
+    // showing the usual thank-you and leaving stale quantities unexplained.
+    if (writeResults.some((succeeded) => !succeeded)) {
+      Alert.alert(
+        "Inventory not fully updated",
+        "Your report was saved, but some quantities could not be sent to the server. Check your connection and report those items again.",
+      );
+      return;
+    }
+
     setShowConfirmation(true);
   }
 
@@ -151,9 +173,9 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
       </View>
 
       <CategoryFilter
-        categories={categories}
-        selectedCategory={selectedCategory}
-        onSelect={setSelectedCategory}
+        categories={visibleCategories}
+        selectedCategoryId={selectedCategoryId}
+        onSelect={setSelectedCategoryId}
       />
 
       <FlatList
@@ -187,6 +209,8 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
           return (
             <ReportEntryCard
               item={item}
+              categories={allCategories}
+              units={units}
               displayQuantity={getDisplayQuantity(item)}
               snapshots={entry?.snapshots ?? []}
               note={draftNotes[item.id] ?? entry?.note ?? ""}
@@ -208,7 +232,11 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
         </Text>
 
         {isLocked ? null : (
-          <TouchableOpacity className="btn-primary" activeOpacity={0.85} onPress={handleSubmit}>
+          <TouchableOpacity
+            className="btn-primary"
+            activeOpacity={0.85}
+            onPress={() => void handleSubmit()}
+          >
             <Text className="btn-primary__text">
               {todaysReport ? "Update Report" : "Report"}
             </Text>

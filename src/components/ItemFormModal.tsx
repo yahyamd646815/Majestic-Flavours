@@ -26,11 +26,11 @@ export function ItemFormModal({ visible, item, onClose, onSubmit }: ItemFormModa
   // changing `key`) each time it opens for a new item, so these initializers
   // running fresh on mount is all the "reset" that's needed.
   const [name, setName] = useState(item?.name ?? "");
-  const [category, setCategory] = useState<string | null>(
-    item?.category ?? categories[0]?.name ?? null,
+  const [categoryId, setCategoryId] = useState<string | null>(
+    item?.categoryId ?? categories[0]?.id ?? null,
   );
   const [quantity, setQuantity] = useState(item ? String(item.currentQuantity) : "");
-  const [unit, setUnit] = useState<string | null>(item?.unit ?? units[0]?.label ?? null);
+  const [unitId, setUnitId] = useState<string | null>(item?.unitId ?? units[0]?.id ?? null);
   const [minThreshold, setMinThreshold] = useState(item ? String(item.minThreshold) : "");
   const [assignedEmployeeIds, setAssignedEmployeeIds] = useState<string[]>(
     item?.assignedEmployeeIds ?? [],
@@ -52,11 +52,11 @@ export function ItemFormModal({ visible, item, onClose, onSubmit }: ItemFormModa
       setError("Enter an item name.");
       return;
     }
-    if (!category) {
+    if (!categoryId) {
       setError("Select a category.");
       return;
     }
-    if (!unit) {
+    if (!unitId) {
       setError("Select a unit.");
       return;
     }
@@ -75,9 +75,9 @@ export function ItemFormModal({ visible, item, onClose, onSubmit }: ItemFormModa
 
     onSubmit({
       name: trimmedName,
-      category,
+      categoryId,
       currentQuantity: parsedQuantity,
-      unit,
+      unitId,
       minThreshold: parsedThreshold,
       assignedEmployeeIds,
     });
@@ -111,13 +111,13 @@ export function ItemFormModal({ visible, item, onClose, onSubmit }: ItemFormModa
                 <Text className="font-inter-medium text-sm text-text-primary">Category</Text>
                 <View className="flex-row flex-wrap gap-2">
                   {categories.map((c) => {
-                    const isActive = category === c.name;
+                    const isActive = categoryId === c.id;
                     return (
                       <TouchableOpacity
                         key={c.id}
                         className={isActive ? "chip chip--active" : "chip"}
                         activeOpacity={0.8}
-                        onPress={() => setCategory(c.name)}
+                        onPress={() => setCategoryId(c.id)}
                       >
                         <Text className={isActive ? "chip__text chip__text--active" : "chip__text"}>
                           {c.name}
@@ -157,13 +157,13 @@ export function ItemFormModal({ visible, item, onClose, onSubmit }: ItemFormModa
                 <Text className="font-inter-medium text-sm text-text-primary">Unit</Text>
                 <View className="flex-row flex-wrap gap-2">
                   {units.map((u) => {
-                    const isActive = unit === u.label;
+                    const isActive = unitId === u.id;
                     return (
                       <TouchableOpacity
                         key={u.id}
                         className={isActive ? "chip chip--active" : "chip"}
                         activeOpacity={0.8}
-                        onPress={() => setUnit(u.label)}
+                        onPress={() => setUnitId(u.id)}
                       >
                         <Text className={isActive ? "chip__text chip__text--active" : "chip__text"}>
                           {u.label}

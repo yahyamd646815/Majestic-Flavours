@@ -3,11 +3,15 @@ import { useState } from "react";
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
 import { colors, fonts, radii, spacing } from "@/constants/theme";
+import { getCategoryName, getUnitLabel } from "@/lib/inventoryLabels";
 import { formatSnapshotTime } from "@/lib/reports";
-import type { InventoryItem, ReportItemSnapshot } from "@/types/inventory";
+import type { Category, InventoryItem, ReportItemSnapshot, Unit } from "@/types/inventory";
 
 type ReportEntryCardProps = {
   item: InventoryItem;
+  /** Needed to resolve the item's `categoryId` / `unitId` into display text. */
+  categories: Category[];
+  units: Unit[];
   /** The draft quantity if this item has been touched, otherwise the live one. */
   displayQuantity: number;
   /** Everything already recorded for this item in today's report. */
@@ -23,6 +27,8 @@ type ReportEntryCardProps = {
 /** One item being reported: stepper, recorded history and an optional note. */
 export function ReportEntryCard({
   item,
+  categories,
+  units,
   displayQuantity,
   snapshots,
   note,
@@ -33,6 +39,9 @@ export function ReportEntryCard({
   // Collapsed by default — a list can run to 200+ items, and most of them
   // never get a note.
   const [isNoteOpen, setIsNoteOpen] = useState(false);
+
+  const categoryName = getCategoryName(categories, item.categoryId);
+  const unitLabel = getUnitLabel(units, item.unitId);
 
   const isOutOfStock = displayQuantity === 0;
   const isLowStock = !isOutOfStock && displayQuantity <= item.minThreshold;
@@ -57,7 +66,7 @@ export function ReportEntryCard({
       <View className="flex-row items-start justify-between gap-2">
         <View className="flex-1">
           <Text className="font-inter-semibold text-base text-text-primary">{item.name}</Text>
-          <Text className="font-inter text-xs text-text-secondary">{item.category}</Text>
+          <Text className="font-inter text-xs text-text-secondary">{categoryName}</Text>
         </View>
         <View className={badgeClass}>
           <Text className={badgeTextClass}>{statusLabel}</Text>
@@ -75,13 +84,13 @@ export function ReportEntryCard({
           disabled={isOutOfStock || isLocked}
           onPress={() => onQuantityChange(displayQuantity - 1)}
           accessibilityRole="button"
-          accessibilityLabel={`Remove one ${item.unit} of ${item.name}`}
+          accessibilityLabel={`Remove one ${unitLabel} of ${item.name}`}
         >
           <Ionicons name="remove" size={22} color={colors.maroon} />
         </TouchableOpacity>
 
         <Text className="font-inter-semibold text-lg text-text-primary">
-          {displayQuantity} {item.unit}
+          {displayQuantity} {unitLabel}
         </Text>
 
         <TouchableOpacity
@@ -94,7 +103,7 @@ export function ReportEntryCard({
           disabled={isLocked}
           onPress={() => onQuantityChange(displayQuantity + 1)}
           accessibilityRole="button"
-          accessibilityLabel={`Add one ${item.unit} of ${item.name}`}
+          accessibilityLabel={`Add one ${unitLabel} of ${item.name}`}
         >
           <Ionicons name="add" size={22} color={colors.textPrimary} />
         </TouchableOpacity>
@@ -102,14 +111,14 @@ export function ReportEntryCard({
 
       {hasPendingChange ? (
         <Text className="font-inter text-xs text-low-stock">
-          Not reported yet: {item.currentQuantity} → {displayQuantity} {item.unit}
+          Not reported yet: {item.currentQuantity} → {displayQuantity} {unitLabel}
         </Text>
       ) : null}
 
       {snapshots.length > 0 ? (
         <View className="gap-0.5">
           <Text className="font-inter-medium text-xs text-text-primary">
-            {snapshots.map((snapshot) => snapshot.quantity).join(" → ")} {item.unit}
+            {snapshots.map((snapshot) => snapshot.quantity).join(" → ")} {unitLabel}
           </Text>
           <Text className="font-inter text-xs text-text-secondary">
             {snapshots.length === 1 ? "Reported at" : "Last reported at"}{" "}

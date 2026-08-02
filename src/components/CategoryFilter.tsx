@@ -4,12 +4,17 @@ import type { Category } from "@/types/inventory";
 
 type CategoryFilterProps = {
   categories: Category[];
-  selectedCategory: string | null;
-  onSelect: (category: string | null) => void;
+  /** `null` means "All". Otherwise a `Category.id`, matched against `item.categoryId`. */
+  selectedCategoryId: string | null;
+  onSelect: (categoryId: string | null) => void;
 };
 
-export function CategoryFilter({ categories, selectedCategory, onSelect }: CategoryFilterProps) {
-  const isAllActive = selectedCategory === null;
+export function CategoryFilter({
+  categories,
+  selectedCategoryId,
+  onSelect,
+}: CategoryFilterProps) {
+  const isAllActive = selectedCategoryId === null;
 
   return (
     <ScrollView
@@ -27,13 +32,13 @@ export function CategoryFilter({ categories, selectedCategory, onSelect }: Categ
       </TouchableOpacity>
 
       {categories.map((category) => {
-        const isActive = selectedCategory === category.name;
+        const isActive = selectedCategoryId === category.id;
         return (
           <TouchableOpacity
             key={category.id}
             className={isActive ? "chip chip--active" : "chip"}
             activeOpacity={0.8}
-            onPress={() => onSelect(category.name)}
+            onPress={() => onSelect(category.id)}
           >
             <Text className={isActive ? "chip__text chip__text--active" : "chip__text"}>
               {category.name}
