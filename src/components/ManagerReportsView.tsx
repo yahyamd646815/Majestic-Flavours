@@ -14,9 +14,11 @@ import {
   matchesDateFilter,
   reportMatchesCategory,
 } from "@/lib/reports";
+import { getUnitLabel } from "@/lib/inventoryLabels";
 import { useInventoryStore } from "@/store/inventoryStore";
 import { useReportStore } from "@/store/reportStore";
-import type { AppUser, InventoryItem, Report } from "@/types/inventory";
+import { useUnitsStore } from "@/store/unitsStore";
+import type { AppUser, InventoryItem, Report, Unit } from "@/types/inventory";
 
 const employees = sampleUsers.filter((user) => user.role === "employee");
 
@@ -31,6 +33,7 @@ type ManagerReportsViewProps = {
 export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
   const items = useInventoryStore((state) => state.items);
   const categories = useInventoryStore((state) => state.categories);
+  const units = useUnitsStore((state) => state.units);
   const reports = useReportStore((state) => state.reports);
   const getReportForReporterAndDate = useReportStore(
     (state) => state.getReportForReporterAndDate,
@@ -38,7 +41,7 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
 
   const [dateFilter, setDateFilter] = useState<ReportDateFilter>("all");
   const [reporterId, setReporterId] = useState<string | null>(null);
-  const [category, setCategory] = useState<string | null>(null);
+  const [categoryId, setCategoryId] = useState<string | null>(null);
   const [detailReportId, setDetailReportId] = useState<string | null>(null);
 
   const todayIsoDate = getTodayIsoDate();
@@ -76,14 +79,21 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
         // never appears here at all (see todayReporterCandidates above), so
         // there's nothing further to filter for them.
         .filter(({ reporter, report }) => {
-          if (category === null) return true;
-          if (report) return reportMatchesCategory(report, items, category);
+          if (categoryId === null) return true;
+          if (report) return reportMatchesCategory(report, items, categoryId);
           return items.some(
             (item) =>
-              item.category === category && item.assignedEmployeeIds.includes(reporter.id),
+              item.categoryId === categoryId && item.assignedEmployeeIds.includes(reporter.id),
           );
         }),
-    [todayReporterCandidates, getReportForReporterAndDate, reporterId, category, items, todayIsoDate],
+    [
+      todayReporterCandidates,
+      getReportForReporterAndDate,
+      reporterId,
+      categoryId,
+      items,
+      todayIsoDate,
+    ],
   );
 
   const historicalReports = useMemo(
@@ -92,12 +102,13 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
         .filter((report) => {
           if (!matchesDateFilter(report.date, dateFilter, todayIsoDate)) return false;
           if (reporterId !== null && report.reporterId !== reporterId) return false;
-          if (category !== null && !reportMatchesCategory(report, items, category)) return false;
+          if (categoryId !== null && !reportMatchesCategory(report, items, categoryId))
+            return false;
           return true;
         })
         // Newest first.
         .sort((a, b) => b.date.localeCompare(a.date)),
-    [reports, items, dateFilter, reporterId, category, todayIsoDate],
+    [reports, items, dateFilter, reporterId, categoryId, todayIsoDate],
   );
 
   const detailReport = reports.find((report) => report.id === detailReportId);
@@ -111,8 +122,8 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
         selectedReporterId={reporterId}
         onReporterChange={setReporterId}
         categories={categories}
-        selectedCategory={category}
-        onCategoryChange={setCategory}
+        selectedCategoryId={categoryId}
+        onCategoryChange={setCategoryId}
       />
 
       {dateFilter === "today" ? (
@@ -129,6 +140,7 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
               reporter={row.reporter}
               report={row.report}
               items={items}
+              units={units}
               onPress={() => setDetailReportId(row.report?.id ?? null)}
             />
           )}
@@ -146,6 +158,8 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
             <ReportCard
               report={report}
               items={items}
+              categories={categories}
+              units={units}
               reporter={sampleUsers.find((user) => user.id === report.reporterId)}
               isLocked={isReportLocked(report, todayIsoDate)}
             />
@@ -157,6 +171,8 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
         visible={detailReport !== undefined}
         report={detailReport}
         items={items}
+        categories={categories}
+        units={units}
         reporter={sampleUsers.find((user) => user.id === detailReport?.reporterId)}
         isLocked={detailReport ? isReportLocked(detailReport, todayIsoDate) : false}
         onClose={() => setDetailReportId(null)}
@@ -174,11 +190,12 @@ type ReporterTodayRowProps = {
   report?: Report;
   /** Used to resolve previewed item names and units. */
   items: InventoryItem[];
+  units: Unit[];
   onPress: () => void;
 };
 
 /** One reporter's status for today — tappable once their report exists. */
-function ReporterTodayRow({ reporter, report, items, onPress }: ReporterTodayRowProps) {
+function ReporterTodayRow({ reporter, report, items, units, onPress }: ReporterTodayRowProps) {
   const hasReport = report !== undefined;
   const entries = report?.itemEntries ?? [];
   const previewEntries = entries.slice(0, PREVIEW_LIMIT);
@@ -239,7 +256,9 @@ function ReporterTodayRow({ reporter, report, items, onPress }: ReporterTodayRow
                   numberOfLines={1}
                 >
                   {item?.name ?? "Deleted item"}
-                  {latest ? ` — ${latest.quantity}${item ? ` ${item.unit}` : ""}` : " — note only"}
+                  {latest
+                    ? ` — ${latest.quantity}${item ? ` ${getUnitLabel(units, item.unitId)}` : ""}`
+                    : " — note only"}
                 </Text>
               );
             })}

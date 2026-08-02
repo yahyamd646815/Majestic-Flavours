@@ -4,11 +4,15 @@ import { useMemo, useState } from "react";
 import { Alert, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { ErrorState } from "@/components/ErrorState";
+import { LoadingState } from "@/components/LoadingState";
 import { ManagerReportsView } from "@/components/ManagerReportsView";
 import { ReportEntryView } from "@/components/ReportEntryView";
 import { colors } from "@/constants/theme";
 import { sampleUsers } from "@/data/sampleUsers";
+import { useSupabaseClient } from "@/lib/supabase";
 import { useInventoryStore } from "@/store/inventoryStore";
+import { useUnitsStore } from "@/store/unitsStore";
 import { parseRole } from "@/types/role";
 
 function showExportComingSoon() {
@@ -20,7 +24,14 @@ export default function Reports() {
   const role = parseRole(user?.publicMetadata?.role);
   const canViewAllReports = role === "admin" || role === "manager";
 
+  const supabase = useSupabaseClient();
   const items = useInventoryStore((state) => state.items);
+  const isLoading = useInventoryStore((state) => state.isLoading);
+  const error = useInventoryStore((state) => state.error);
+  const fetchAll = useInventoryStore((state) => state.fetchAll);
+  const unitsLoading = useUnitsStore((state) => state.isLoading);
+  const unitsError = useUnitsStore((state) => state.error);
+  const fetchUnits = useUnitsStore((state) => state.fetchAll);
 
   // Clerk accounts are not linked to `sampleUsers` yet, so bridge the two by
   // email — `sampleUsers` ids are what inventory and reports are keyed on.
@@ -41,6 +52,9 @@ export default function Reports() {
   );
 
   const footer = <View className="pt-6" />;
+
+  const combinedError = error ?? unitsError;
+  const isEmptyAndLoading = (isLoading || unitsLoading) && items.length === 0;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.white }}>
@@ -107,7 +121,21 @@ export default function Reports() {
           ) : null}
         </View>
 
-        {canViewAllReports ? (
+        {/* Inventory AND units have to be loaded before any of this is
+            meaningful — an employee would otherwise be told they have no
+            assigned items, or see blank unit labels, while a fetch is still
+            in flight. */}
+        {combinedError !== null ? (
+          <ErrorState
+            message={combinedError}
+            onRetry={() => {
+              void fetchAll(supabase);
+              void fetchUnits(supabase);
+            }}
+          />
+        ) : isEmptyAndLoading ? (
+          <LoadingState />
+        ) : canViewAllReports ? (
           // Admins and Managers report on every item, not just assigned ones.
           isSelfReporting && currentSampleUser ? (
             <ReportEntryView reporterId={currentSampleUser.id} items={items} />

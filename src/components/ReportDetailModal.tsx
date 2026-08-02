@@ -2,13 +2,15 @@ import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "rea
 
 import { ReportCard } from "@/components/ReportCard";
 import { colors, radii, spacing } from "@/constants/theme";
-import type { AppUser, InventoryItem, Report } from "@/types/inventory";
+import type { AppUser, Category, InventoryItem, Report, Unit } from "@/types/inventory";
 
 type ReportDetailModalProps = {
   visible: boolean;
   /** Undefined while no report is selected — the modal renders nothing then. */
   report?: Report;
   items: InventoryItem[];
+  categories: Category[];
+  units: Unit[];
   reporter?: AppUser;
   isLocked: boolean;
   onClose: () => void;
@@ -19,6 +21,8 @@ export function ReportDetailModal({
   visible,
   report,
   items,
+  categories,
+  units,
   reporter,
   isLocked,
   onClose,
@@ -36,6 +40,8 @@ export function ReportDetailModal({
               <ReportCard
                 report={report}
                 items={items}
+                categories={categories}
+                units={units}
                 reporter={reporter}
                 isLocked={isLocked}
               />

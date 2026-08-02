@@ -1,12 +1,16 @@
+// Unused since 13b — inventory now comes from Supabase. Kept in place, with
+// the field names updated to the id-based shape so it still typechecks, until
+// the cleanup pass once 13c lands. The ids match `data/categories.ts` and
+// `data/units.ts`.
 import type { InventoryItem } from "@/types/inventory";
 
 export const sampleInventory: InventoryItem[] = [
   {
     id: "item-1",
     name: "Whole Milk",
-    category: "Dairy",
+    categoryId: "dairy",
     currentQuantity: 18,
-    unit: "liters",
+    unitId: "liters",
     minThreshold: 10,
     assignedEmployeeIds: ["user-4", "user-5"],
     createdAt: "2026-06-01T08:00:00.000Z",
@@ -14,9 +18,9 @@ export const sampleInventory: InventoryItem[] = [
   {
     id: "item-2",
     name: "Paneer",
-    category: "Dairy",
+    categoryId: "dairy",
     currentQuantity: 6,
-    unit: "kg",
+    unitId: "kg",
     minThreshold: 5,
     assignedEmployeeIds: ["user-5", "user-6"],
     createdAt: "2026-06-01T08:00:00.000Z",
@@ -24,9 +28,9 @@ export const sampleInventory: InventoryItem[] = [
   {
     id: "item-3",
     name: "Chicken Breast",
-    category: "Meat",
+    categoryId: "meat",
     currentQuantity: 25,
-    unit: "kg",
+    unitId: "kg",
     minThreshold: 15,
     assignedEmployeeIds: ["user-4", "user-6"],
     createdAt: "2026-06-02T08:00:00.000Z",
@@ -34,9 +38,9 @@ export const sampleInventory: InventoryItem[] = [
   {
     id: "item-4",
     name: "Mutton",
-    category: "Meat",
+    categoryId: "meat",
     currentQuantity: 12,
-    unit: "kg",
+    unitId: "kg",
     minThreshold: 10,
     assignedEmployeeIds: ["user-4", "user-5"],
     createdAt: "2026-06-02T08:00:00.000Z",
@@ -44,9 +48,9 @@ export const sampleInventory: InventoryItem[] = [
   {
     id: "item-5",
     name: "Onions",
-    category: "Vegetables",
+    categoryId: "vegetables",
     currentQuantity: 40,
-    unit: "kg",
+    unitId: "kg",
     minThreshold: 20,
     assignedEmployeeIds: ["user-5", "user-6"],
     createdAt: "2026-06-03T08:00:00.000Z",
@@ -54,9 +58,9 @@ export const sampleInventory: InventoryItem[] = [
   {
     id: "item-6",
     name: "Tomatoes",
-    category: "Vegetables",
+    categoryId: "vegetables",
     currentQuantity: 15,
-    unit: "kg",
+    unitId: "kg",
     minThreshold: 12,
     assignedEmployeeIds: ["user-4", "user-6"],
     createdAt: "2026-06-03T08:00:00.000Z",
@@ -64,9 +68,9 @@ export const sampleInventory: InventoryItem[] = [
   {
     id: "item-7",
     name: "Basmati Rice",
-    category: "Dry Goods",
+    categoryId: "dry-goods",
     currentQuantity: 80,
-    unit: "kg",
+    unitId: "kg",
     minThreshold: 30,
     assignedEmployeeIds: ["user-4", "user-5"],
     createdAt: "2026-06-04T08:00:00.000Z",
@@ -74,9 +78,9 @@ export const sampleInventory: InventoryItem[] = [
   {
     id: "item-8",
     name: "Red Lentils",
-    category: "Dry Goods",
+    categoryId: "dry-goods",
     currentQuantity: 10,
-    unit: "bags",
+    unitId: "bags",
     minThreshold: 8,
     assignedEmployeeIds: ["user-5", "user-6"],
     createdAt: "2026-06-04T08:00:00.000Z",
@@ -84,9 +88,9 @@ export const sampleInventory: InventoryItem[] = [
   {
     id: "item-9",
     name: "Cooking Oil",
-    category: "Dry Goods",
+    categoryId: "dry-goods",
     currentQuantity: 20,
-    unit: "bottles",
+    unitId: "bottles",
     minThreshold: 15,
     assignedEmployeeIds: ["user-4", "user-6"],
     createdAt: "2026-06-05T08:00:00.000Z",
@@ -94,9 +98,9 @@ export const sampleInventory: InventoryItem[] = [
   {
     id: "item-10",
     name: "Soft Drinks",
-    category: "Beverages",
+    categoryId: "beverages",
     currentQuantity: 60,
-    unit: "bottles",
+    unitId: "bottles",
     minThreshold: 24,
     assignedEmployeeIds: ["user-4", "user-5"],
     createdAt: "2026-06-05T08:00:00.000Z",
@@ -104,9 +108,9 @@ export const sampleInventory: InventoryItem[] = [
   {
     id: "item-11",
     name: "Mineral Water",
-    category: "Beverages",
+    categoryId: "beverages",
     currentQuantity: 45,
-    unit: "crates",
+    unitId: "crates",
     minThreshold: 20,
     assignedEmployeeIds: ["user-5", "user-6"],
     createdAt: "2026-06-06T08:00:00.000Z",
@@ -114,9 +118,9 @@ export const sampleInventory: InventoryItem[] = [
   {
     id: "item-12",
     name: "Dish Soap",
-    category: "Cleaning Supplies",
+    categoryId: "cleaning-supplies",
     currentQuantity: 4,
-    unit: "boxes",
+    unitId: "boxes",
     minThreshold: 5,
     assignedEmployeeIds: ["user-4", "user-6"],
     createdAt: "2026-06-06T08:00:00.000Z",

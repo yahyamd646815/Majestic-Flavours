@@ -39,11 +39,11 @@ export function formatSnapshotTime(isoTimestamp: string): string {
 export function reportMatchesCategory(
   report: Report,
   items: InventoryItem[],
-  category: string,
+  categoryId: string,
 ): boolean {
   return report.itemEntries.some((entry) => {
     const item = items.find((candidate) => candidate.id === entry.itemId);
-    return item?.category === category;
+    return item?.categoryId === categoryId;
   });
 }
 
