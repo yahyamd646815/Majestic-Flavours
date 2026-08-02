@@ -3,7 +3,6 @@ import { useState } from "react";
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { DevClearStorageButton } from "@/components/DevClearStorageButton";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
 import { SettingsListSection } from "@/components/SettingsListSection";
@@ -183,17 +182,13 @@ export default function Settings() {
 
           {role === "manager" ? renderCategoriesSection(false) : null}
 
-          <View className="gap-3">
-            <TouchableOpacity
-              className="btn-primary"
-              activeOpacity={0.85}
-              onPress={handleSignOutPress}
-            >
-              <Text className="btn-primary__text">Sign Out</Text>
-            </TouchableOpacity>
-
-            {role === "admin" ? <DevClearStorageButton /> : null}
-          </View>
+          <TouchableOpacity
+            className="btn-primary"
+            activeOpacity={0.85}
+            onPress={handleSignOutPress}
+          >
+            <Text className="btn-primary__text">Sign Out</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
 

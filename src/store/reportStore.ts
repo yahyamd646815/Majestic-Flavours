@@ -1,141 +1,180 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { create } from "zustand";
-import { createJSONStorage, persist } from "zustand/middleware";
 
 import { generateId } from "@/lib/id";
 import { getTodayIsoDate } from "@/lib/reports";
 import type { Report, ReportItemEntry } from "@/types/inventory";
 
-/** One item's part of a submit — quantity and note are independent, so an
- * item can be submitted for either, or both. */
+function mapDbReportToReport(row: Record<string, unknown>): Report {
+  const entryRows = (row.report_item_entries as Record<string, unknown>[] | null) ?? [];
+
+  const itemEntries = entryRows.map((entryRow): ReportItemEntry => {
+    const snapshotRows =
+      (entryRow.report_item_snapshots as Record<string, unknown>[] | null) ?? [];
+
+    return {
+      itemId: entryRow.item_id as string,
+      note: entryRow.note as string,
+      snapshots: snapshotRows
+        .map((snapshotRow) => ({
+          quantity: snapshotRow.quantity as number,
+          recordedAt: snapshotRow.recorded_at as string,
+        }))
+        .sort((a, b) => a.recordedAt.localeCompare(b.recordedAt)),
+    };
+  });
+
+  return {
+    id: row.id as string,
+    reporterId: row.reporter_id as string,
+    date: row.date as string,
+    content: row.content as string,
+    isLocked: row.is_locked as boolean,
+    itemEntries,
+  };
+}
+
+const REPORT_SELECT = "*, report_item_entries(*, report_item_snapshots(*))";
+
 export type ItemSubmission = {
   itemId: string;
-  /** Present only if this item's quantity is being recorded now. */
   newSnapshotQuantity?: number;
-  /** Present only if this item's note was added or edited. Can be "" to
-   * explicitly clear an existing note. */
   note?: string;
 };
 
+export type SubmitReportResult = { reportId: string; failedItemIds: string[] } | null;
+
 type ReportState = {
   reports: Report[];
-  /** Returns the report id on success, or `null` if the submission was rejected. */
+  isLoading: boolean;
+  error: string | null;
+  fetchAll: (supabase: SupabaseClient) => Promise<void>;
   submitReport: (
+    supabase: SupabaseClient,
     reporterId: string,
     date: string,
     content: string,
     itemSubmissions: ItemSubmission[],
-  ) => string | null;
+  ) => Promise<SubmitReportResult>;
   getReportForReporterAndDate: (reporterId: string, date: string) => Report | undefined;
   getReportsForItem: (itemId: string) => Report[];
   getReportsForReporter: (reporterId: string) => Report[];
-  reset: () => void;
 };
 
-export const useReportStore = create<ReportState>()(
-  persist(
-    (set, get) => ({
-      reports: [],
-      // Append, not replace: `itemEntries` is the day's history, so each
-      // submit adds a snapshot to the items that actually moved and leaves
-      // every earlier snapshot in place. The caller only sends items whose
-      // quantity or note changed since the last submit.
-      //
-      // Rejects (returns null) rather than trusting the caller blindly:
-      // - `date` must match the store's own idea of "today" — guards against
-      //   a UI that went stale across a midnight rollover writing into the
-      //   wrong day's report.
-      // - an existing report already marked `isLocked` can never be written
-      //   to, regardless of what date was passed.
-      submitReport: (reporterId, date, content, itemSubmissions) => {
-        if (date !== getTodayIsoDate()) {
-          console.warn(
-            "[reportStore] Refusing to submit a report for a non-today date:",
-            date,
-          );
-          return null;
-        }
+export const useReportStore = create<ReportState>()((set, get) => ({
+  reports: [],
+  isLoading: true,
+  error: null,
 
-        const existing = get().reports.find(
-          (report) => report.reporterId === reporterId && report.date === date,
-        );
+  fetchAll: async (supabase) => {
+    set({ isLoading: true, error: null });
+    const { data, error } = await supabase.from("reports").select(REPORT_SELECT);
 
-        if (existing?.isLocked) {
-          console.warn("[reportStore] Refusing to modify a locked report:", existing.id);
-          return null;
-        }
+    if (error) {
+      set({
+        isLoading: false,
+        error: "Could not load reports. Check your connection and try again.",
+      });
+      return;
+    }
 
-        const now = new Date().toISOString();
+    set({
+      reports: ((data ?? []) as Record<string, unknown>[]).map(mapDbReportToReport),
+      isLoading: false,
+      error: null,
+    });
+  },
 
-        function applySubmissions(entries: ReportItemEntry[]): ReportItemEntry[] {
-          const next = entries.map((entry) => ({
-            ...entry,
-            snapshots: [...entry.snapshots],
-          }));
-          for (const submission of itemSubmissions) {
-            let entry = next.find((e) => e.itemId === submission.itemId);
-            if (!entry) {
-              entry = { itemId: submission.itemId, snapshots: [], note: "" };
-              next.push(entry);
-            }
-            if (submission.newSnapshotQuantity !== undefined) {
-              entry.snapshots.push({
-                quantity: submission.newSnapshotQuantity,
-                recordedAt: now,
-              });
-            }
-            if (submission.note !== undefined) {
-              entry.note = submission.note;
-            }
-          }
-          return next;
-        }
+  submitReport: async (supabase, reporterId, date, content, itemSubmissions) => {
+    if (date !== getTodayIsoDate()) {
+      console.warn("[reportStore] Refusing to submit a report for a non-today date:", date);
+      return null;
+    }
 
-        if (existing) {
-          const itemEntries = applySubmissions(existing.itemEntries);
-          set((state) => ({
-            reports: state.reports.map((report) =>
-              report.id === existing.id ? { ...report, content, itemEntries } : report,
-            ),
-          }));
-          return existing.id;
-        }
+    const existing = get().reports.find(
+      (report) => report.reporterId === reporterId && report.date === date,
+    );
 
-        const id = generateId("report");
-        set((state) => ({
-          reports: [
-            ...state.reports,
-            {
-              id,
-              reporterId,
-              date,
-              content,
-              itemEntries: applySubmissions([]),
-              isLocked: false,
-            },
-          ],
-        }));
-        return id;
-      },
-      getReportForReporterAndDate: (reporterId, date) =>
-        get().reports.find(
-          (report) => report.reporterId === reporterId && report.date === date,
-        ),
-      getReportsForItem: (itemId) =>
-        get()
-          .reports.filter((report) =>
-            report.itemEntries.some((entry) => entry.itemId === itemId),
-          )
-          .map((report) => ({ ...report })),
-      getReportsForReporter: (reporterId) =>
-        get()
-          .reports.filter((report) => report.reporterId === reporterId)
-          .map((report) => ({ ...report })),
-      reset: () => set({ reports: [] }),
-    }),
-    {
-      name: "report-storage",
-      storage: createJSONStorage(() => AsyncStorage),
-    },
-  ),
-);
+    if (existing?.isLocked) {
+      console.warn("[reportStore] Refusing to modify a locked report:", existing.id);
+      return null;
+    }
+
+    const reportId = existing?.id ?? generateId("report");
+    const { error: reportError } = await supabase
+      .from("reports")
+      .upsert(
+        { id: reportId, reporter_id: reporterId, date, content, is_locked: false },
+        { onConflict: "reporter_id,date" },
+      );
+    if (reportError) return null;
+
+    const failedItemIds: string[] = [];
+
+    for (const submission of itemSubmissions) {
+      const existingEntry = existing?.itemEntries.find(
+        (entry) => entry.itemId === submission.itemId,
+      );
+      const noteToWrite = submission.note ?? existingEntry?.note ?? "";
+
+      const { data: entryData, error: entryError } = await supabase
+        .from("report_item_entries")
+        .upsert(
+          {
+            id: `entry-${reportId}-${submission.itemId}`,
+            report_id: reportId,
+            item_id: submission.itemId,
+            note: noteToWrite,
+          },
+          { onConflict: "report_id,item_id" },
+        )
+        .select()
+        .single();
+
+      if (entryError || !entryData) {
+        failedItemIds.push(submission.itemId);
+        continue;
+      }
+
+      if (submission.newSnapshotQuantity !== undefined) {
+        const { error: snapshotError } = await supabase.from("report_item_snapshots").insert({
+          id: generateId("snapshot"),
+          report_item_entry_id: entryData.id,
+          quantity: submission.newSnapshotQuantity,
+        });
+        if (snapshotError) failedItemIds.push(submission.itemId);
+      }
+    }
+
+    const { data: refetched } = await supabase
+      .from("reports")
+      .select(REPORT_SELECT)
+      .eq("id", reportId)
+      .single();
+
+    if (refetched) {
+      const updated = mapDbReportToReport(refetched as Record<string, unknown>);
+      // Keyed on the current state at merge time, not the `existing` value
+      // captured before the write — a cache miss earlier shouldn't be able
+      // to produce a duplicate entry for the same report id here.
+      set((state) => ({
+        reports: state.reports.some((report) => report.id === reportId)
+          ? state.reports.map((report) => (report.id === reportId ? updated : report))
+          : [...state.reports, updated],
+      }));
+    }
+
+    return { reportId, failedItemIds };
+  },
+
+  getReportForReporterAndDate: (reporterId, date) =>
+    get().reports.find((report) => report.reporterId === reporterId && report.date === date),
+  getReportsForItem: (itemId) =>
+    get()
+      .reports.filter((report) => report.itemEntries.some((entry) => entry.itemId === itemId))
+      .map((report) => ({ ...report })),
+  getReportsForReporter: (reporterId) =>
+    get()
+      .reports.filter((report) => report.reporterId === reporterId)
+      .map((report) => ({ ...report })),
+}));

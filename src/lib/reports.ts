@@ -1,11 +1,20 @@
 import type { InventoryItem, Report } from "@/types/inventory";
 
-/** Local calendar date as `YYYY-MM-DD` — the format every `Report.date` uses. */
+/**
+ * Local calendar date as `YYYY-MM-DD`, computed for Riyadh specifically —
+ * not the device's own timezone. Riyadh has a fixed UTC+3 offset with no
+ * DST, so plain UTC arithmetic is both simpler and more reliable than
+ * Intl.DateTimeFormat with a timeZone option, which has real documented
+ * cross-platform inconsistencies in Hermes (React Native's JS engine).
+ * This also means the app's notion of "today" no longer depends on a test
+ * device's timezone being set correctly at all.
+ */
 export function getTodayIsoDate(): string {
   const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${now.getFullYear()}-${month}-${day}`;
+  const riyadh = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+  const month = String(riyadh.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(riyadh.getUTCDate()).padStart(2, "0");
+  return `${riyadh.getUTCFullYear()}-${month}-${day}`;
 }
 
 /**

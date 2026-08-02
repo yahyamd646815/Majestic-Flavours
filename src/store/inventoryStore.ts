@@ -23,7 +23,7 @@ function mapDbItemToItem(row: Record<string, unknown>): InventoryItem {
  * An in-memory cache of whatever Supabase last returned — not a second source
  * of truth. Deliberately not persisted: the database is authoritative now, and
  * an AsyncStorage copy would only drift away from it. `fetchAll` re-seeds this
- * once per signed-in session (see `useInventorySync`).
+ * once per signed-in session (see `useSupabaseSync`).
  */
 type InventoryState = {
   items: InventoryItem[];

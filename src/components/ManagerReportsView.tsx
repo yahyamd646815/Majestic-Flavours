@@ -7,6 +7,7 @@ import { ReportDetailModal } from "@/components/ReportDetailModal";
 import { ReportFilters } from "@/components/ReportFilters";
 import { colors } from "@/constants/theme";
 import { sampleUsers } from "@/data/sampleUsers";
+import { getUnitLabel } from "@/lib/inventoryLabels";
 import type { ReportDateFilter } from "@/lib/reports";
 import {
   getTodayIsoDate,
@@ -14,26 +15,23 @@ import {
   matchesDateFilter,
   reportMatchesCategory,
 } from "@/lib/reports";
-import { getUnitLabel } from "@/lib/inventoryLabels";
+import { useAppUsersStore } from "@/store/appUsersStore";
 import { useInventoryStore } from "@/store/inventoryStore";
 import { useReportStore } from "@/store/reportStore";
 import { useUnitsStore } from "@/store/unitsStore";
 import type { AppUser, InventoryItem, Report, Unit } from "@/types/inventory";
 
-const employees = sampleUsers.filter((user) => user.role === "employee");
+type ReporterCandidate = AppUser & { clerkUserId?: string };
 
 type ManagerReportsViewProps = {
   footer: ReactElement;
 };
 
-/**
- * Admin and Manager view. "Today" tracks who has reported yet; past ranges
- * list the reports themselves, one per reporter per day.
- */
 export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
   const items = useInventoryStore((state) => state.items);
   const categories = useInventoryStore((state) => state.categories);
   const units = useUnitsStore((state) => state.units);
+  const appUsers = useAppUsersStore((state) => state.users);
   const reports = useReportStore((state) => state.reports);
   const getReportForReporterAndDate = useReportStore(
     (state) => state.getReportForReporterAndDate,
@@ -46,23 +44,35 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
 
   const todayIsoDate = getTodayIsoDate();
 
-  // Today's list is every Employee (expected to report) plus any Admin or
-  // Manager who happens to have filed their own report today — not every
-  // Admin/Manager, since self-reporting is optional for them, not expected
-  // coverage the way it is for Employees.
+  // Roles still live only in `sampleUsers` on the client, but reports are
+  // keyed on real Clerk ids now — bridged by email, case-insensitively
+  // (Clerk often normalizes case on sign-up regardless of how the address
+  // was hand-typed into sampleUsers.ts). Someone who has never signed in
+  // simply has no Clerk id, and therefore no report.
+  const reporters = useMemo<ReporterCandidate[]>(
+    () =>
+      sampleUsers.map((sampleUser) => {
+        const targetEmail = sampleUser.email.toLowerCase();
+        const synced = appUsers.find((appUser) => appUser.email.toLowerCase() === targetEmail);
+        return {
+          ...sampleUser,
+          name: synced?.name ?? sampleUser.name,
+          clerkUserId: synced?.clerkUserId,
+        };
+      }),
+    [appUsers],
+  );
+
   const todayReporterCandidates = useMemo(() => {
-    const selfReporters = sampleUsers.filter(
-      (user) =>
-        user.role !== "employee" &&
-        getReportForReporterAndDate(user.id, todayIsoDate) !== undefined,
+    const selfReporters = reporters.filter(
+      (reporter) =>
+        reporter.role !== "employee" &&
+        reporter.clerkUserId !== undefined &&
+        getReportForReporterAndDate(reporter.clerkUserId, todayIsoDate) !== undefined,
     );
-    return [...employees, ...selfReporters];
-    // `reports` looks unused to the linter, but `getReportForReporterAndDate`
-    // reads it lazily through the store's `get()` — without it as a
-    // dependency this memo would not recompute when someone submits or
-    // updates today's report.
+    return [...reporters.filter((reporter) => reporter.role === "employee"), ...selfReporters];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reports, getReportForReporterAndDate, todayIsoDate]);
+  }, [reports, reporters, getReportForReporterAndDate, todayIsoDate]);
 
   const todayRows = useMemo(
     () =>
@@ -70,14 +80,10 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
         .filter((reporter) => reporterId === null || reporter.id === reporterId)
         .map((reporter) => ({
           reporter,
-          report: getReportForReporterAndDate(reporter.id, todayIsoDate),
+          report: reporter.clerkUserId
+            ? getReportForReporterAndDate(reporter.clerkUserId, todayIsoDate)
+            : undefined,
         }))
-        // With a category filter on: someone who has already reported stays
-        // listed only if that report touched the category. An Employee who
-        // hasn't reported yet stays listed only if they're actually assigned
-        // to an item in that category. A not-yet-reported Admin/Manager
-        // never appears here at all (see todayReporterCandidates above), so
-        // there's nothing further to filter for them.
         .filter(({ reporter, report }) => {
           if (categoryId === null) return true;
           if (report) return reportMatchesCategory(report, items, categoryId);
@@ -96,19 +102,24 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
     ],
   );
 
+  const selectedReporterClerkId =
+    reporterId === null
+      ? null
+      : (reporters.find((reporter) => reporter.id === reporterId)?.clerkUserId ?? null);
+
   const historicalReports = useMemo(
     () =>
       reports
         .filter((report) => {
           if (!matchesDateFilter(report.date, dateFilter, todayIsoDate)) return false;
-          if (reporterId !== null && report.reporterId !== reporterId) return false;
+          if (reporterId !== null && report.reporterId !== selectedReporterClerkId)
+            return false;
           if (categoryId !== null && !reportMatchesCategory(report, items, categoryId))
             return false;
           return true;
         })
-        // Newest first.
         .sort((a, b) => b.date.localeCompare(a.date)),
-    [reports, items, dateFilter, reporterId, categoryId, todayIsoDate],
+    [reports, items, dateFilter, reporterId, selectedReporterClerkId, categoryId, todayIsoDate],
   );
 
   const detailReport = reports.find((report) => report.id === detailReportId);
@@ -118,7 +129,7 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
       <ReportFilters
         dateFilter={dateFilter}
         onDateFilterChange={setDateFilter}
-        reporters={sampleUsers}
+        reporters={reporters}
         selectedReporterId={reporterId}
         onReporterChange={setReporterId}
         categories={categories}
@@ -160,7 +171,6 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
               items={items}
               categories={categories}
               units={units}
-              reporter={sampleUsers.find((user) => user.id === report.reporterId)}
               isLocked={isReportLocked(report, todayIsoDate)}
             />
           )}
@@ -173,7 +183,6 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
         items={items}
         categories={categories}
         units={units}
-        reporter={sampleUsers.find((user) => user.id === detailReport?.reporterId)}
         isLocked={detailReport ? isReportLocked(detailReport, todayIsoDate) : false}
         onClose={() => setDetailReportId(null)}
       />
@@ -181,20 +190,16 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
   );
 }
 
-/** How many touched items the row previews before collapsing the rest into "+N more". */
 const PREVIEW_LIMIT = 3;
 
 type ReporterTodayRowProps = {
   reporter: AppUser;
-  /** Undefined while this reporter has not reported today. */
   report?: Report;
-  /** Used to resolve previewed item names and units. */
   items: InventoryItem[];
   units: Unit[];
   onPress: () => void;
 };
 
-/** One reporter's status for today — tappable once their report exists. */
 function ReporterTodayRow({ reporter, report, items, units, onPress }: ReporterTodayRowProps) {
   const hasReport = report !== undefined;
   const entries = report?.itemEntries ?? [];
@@ -216,7 +221,6 @@ function ReporterTodayRow({ reporter, report, items, units, onPress }: ReporterT
         <Text className="flex-1 font-inter-semibold text-base text-text-primary">
           {reporter.name}
         </Text>
-
         {hasReport ? (
           <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
         ) : null}

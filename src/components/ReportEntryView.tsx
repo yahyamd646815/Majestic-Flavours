@@ -10,26 +10,17 @@ import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { useDraftReport } from "@/context/DraftReportContext";
 import { getTodayIsoDate, isReportLocked } from "@/lib/reports";
 import { useSupabaseClient } from "@/lib/supabase";
+import { useAppUsersStore } from "@/store/appUsersStore";
 import { useInventoryStore } from "@/store/inventoryStore";
 import { useReportStore, type ItemSubmission } from "@/store/reportStore";
 import { useUnitsStore } from "@/store/unitsStore";
 import type { InventoryItem } from "@/types/inventory";
 
 type ReportEntryViewProps = {
-  /** The reporter's `sampleUsers` id — an Employee, or an Admin/Manager self-reporting. */
   reporterId: string;
-  /** The items this person is reporting on. The caller decides the scope:
-   * assigned items for an Employee, all items for Admin/Manager. */
   items: InventoryItem[];
 };
 
-/**
- * Filling out one person's report for today: a stepper per item, an optional
- * note per item, and one note for the day.
- *
- * Every edit here is a draft (see DraftReportContext). Nothing reaches
- * `inventoryStore` or `reportStore` until Report / Update Report is pressed.
- */
 export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
   const todayIsoDate = getTodayIsoDate();
 
@@ -38,9 +29,7 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
   const allCategories = useInventoryStore((state) => state.categories);
   const units = useUnitsStore((state) => state.units);
   const submitReport = useReportStore((state) => state.submitReport);
-  // Called as a selector so the view re-renders when today's report is created
-  // or updated — the getter returns the stored report by reference, so this
-  // stays stable between renders.
+  const selfSynced = useAppUsersStore((state) => state.selfSynced);
   const todaysReport = useReportStore((state) =>
     state.getReportForReporterAndDate(reporterId, todayIsoDate),
   );
@@ -49,16 +38,11 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
     useDraftReport();
 
   const [showConfirmation, setShowConfirmation] = useState(false);
-  // Local to this screen — the Admin/Manager Inventory screen owns
-  // inventoryStore.selectedCategoryId, and sharing it would let the two
-  // screens' filters interfere with each other.
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [dayContent, setDayContent] = useState(todaysReport?.content ?? "");
 
-  // Re-seeds the day note once today's report loads from storage or is created
-  // by the first submit. Keyed on the report id so it never overwrites what
-  // the person is currently typing.
   const seededReportId = useRef(todaysReport?.id);
   useEffect(() => {
     if (todaysReport?.id === seededReportId.current) return;
@@ -68,10 +52,6 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
 
   const isLocked = todaysReport ? isReportLocked(todaysReport, todayIsoDate) : false;
 
-  // Only the categories actually represented in this person's items — an
-  // employee assigned to Dairy and Meat shouldn't see every global category.
-  // Real `{id, name}` pairs now, resolved from the store rather than faked
-  // from the old name string.
   const visibleCategories = useMemo(() => {
     const presentIds = new Set(items.map((item) => item.categoryId));
     return allCategories.filter((category) => presentIds.has(category.id));
@@ -92,8 +72,6 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
     [todaysReport],
   );
 
-  // Pending, not submitted — how many items have been touched since the last
-  // submit. Today's already-reported history is shown per card instead.
   const pendingCount = useMemo(
     () => new Set([...Object.keys(draftQuantities), ...Object.keys(draftNotes)]).size,
     [draftQuantities, draftNotes],
@@ -108,62 +86,73 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
   }
 
   async function handleSubmit() {
-    const itemSubmissions: ItemSubmission[] = [];
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const itemSubmissions: ItemSubmission[] = [];
 
-    for (const item of items) {
-      const draftQuantity = draftQuantities[item.id];
-      const quantityChanged =
-        draftQuantity !== undefined && draftQuantity !== item.currentQuantity;
+      for (const item of items) {
+        const draftQuantity = draftQuantities[item.id];
+        const quantityChanged =
+          draftQuantity !== undefined && draftQuantity !== item.currentQuantity;
 
-      const draftNote = draftNotes[item.id];
-      const existingNote = todaysReport?.itemEntries.find((e) => e.itemId === item.id)?.note ?? "";
-      const noteChanged = draftNote !== undefined && draftNote !== existingNote;
+        const draftNote = draftNotes[item.id];
+        const existingNote =
+          todaysReport?.itemEntries.find((e) => e.itemId === item.id)?.note ?? "";
+        const noteChanged = draftNote !== undefined && draftNote !== existingNote;
 
-      if (!quantityChanged && !noteChanged) continue;
+        if (!quantityChanged && !noteChanged) continue;
 
-      itemSubmissions.push({
-        itemId: item.id,
-        ...(quantityChanged ? { newSnapshotQuantity: draftQuantity } : {}),
-        ...(noteChanged ? { note: draftNote } : {}),
-      });
-    }
+        itemSubmissions.push({
+          itemId: item.id,
+          ...(quantityChanged ? { newSnapshotQuantity: draftQuantity } : {}),
+          ...(noteChanged ? { note: draftNote } : {}),
+        });
+      }
 
-    const result = submitReport(reporterId, todayIsoDate, dayContent.trim(), itemSubmissions);
-    if (result === null) {
-      Alert.alert(
-        "Report could not be saved",
-        "It looks like the day has changed. Please reopen the app and try again.",
+      const result = await submitReport(
+        supabase,
+        reporterId,
+        todayIsoDate,
+        dayContent.trim(),
+        itemSubmissions,
       );
-      return;
-    }
+      if (result === null) {
+        Alert.alert("Report could not be saved", "Check your connection and try again.");
+        return;
+      }
 
-    // Only now do the actual quantities land in Supabase.
-    const quantityUpdates = itemSubmissions.flatMap((submission) =>
-      submission.newSnapshotQuantity === undefined
-        ? []
-        : [{ itemId: submission.itemId, quantity: submission.newSnapshotQuantity }],
-    );
-
-    const writeResults = await Promise.all(
-      quantityUpdates.map((update) =>
-        updateItem(supabase, update.itemId, { currentQuantity: update.quantity }),
-      ),
-    );
-
-    clearDrafts();
-
-    // The report itself is stored locally until 13c, so it is already saved
-    // even when the inventory writes fail — say so plainly rather than
-    // showing the usual thank-you and leaving stale quantities unexplained.
-    if (writeResults.some((succeeded) => !succeeded)) {
-      Alert.alert(
-        "Inventory not fully updated",
-        "Your report was saved, but some quantities could not be sent to the server. Check your connection and report those items again.",
+      const quantityUpdates = itemSubmissions.flatMap((submission) =>
+        submission.newSnapshotQuantity === undefined
+          ? []
+          : [{ itemId: submission.itemId, quantity: submission.newSnapshotQuantity }],
       );
-      return;
-    }
 
-    setShowConfirmation(true);
+      const writeResults = await Promise.all(
+        quantityUpdates.map((update) =>
+          updateItem(supabase, update.itemId, { currentQuantity: update.quantity }),
+        ),
+      );
+
+      const inventoryFailed = writeResults.some((succeeded) => !succeeded);
+      const reportPartiallyFailed = result.failedItemIds.length > 0;
+
+      if (inventoryFailed || reportPartiallyFailed) {
+        // Drafts are kept here too — the alert tells the person to retry the
+        // failed items, so wiping their entered values first would make
+        // that impossible without re-typing everything.
+        Alert.alert(
+          "Report saved with some issues",
+          "Some items could not be fully saved. Check your connection and try those items again.",
+        );
+        return;
+      }
+
+      clearDrafts();
+      setShowConfirmation(true);
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -187,11 +176,7 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
         ItemSeparatorComponent={() => <View className="h-3" />}
         ListHeaderComponent={
           <View className="pb-3">
-            <DayNoteInput
-              value={dayContent}
-              onChangeText={setDayContent}
-              isLocked={isLocked}
-            />
+            <DayNoteInput value={dayContent} onChangeText={setDayContent} isLocked={isLocked} />
           </View>
         }
         ListEmptyComponent={
@@ -226,15 +211,18 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
         <Text className="font-inter text-xs text-text-secondary">
           {isLocked
             ? "Locked. Reports can only be edited on the day they were submitted."
-            : pendingCount === 0
-              ? "No unreported changes."
-              : `${pendingCount} item${pendingCount === 1 ? "" : "s"} edited — not reported yet.`}
+            : !selfSynced
+              ? "Preparing your account..."
+              : pendingCount === 0
+                ? "No unreported changes."
+                : `${pendingCount} item${pendingCount === 1 ? "" : "s"} edited — not reported yet.`}
         </Text>
 
         {isLocked ? null : (
           <TouchableOpacity
             className="btn-primary"
             activeOpacity={0.85}
+            disabled={isSubmitting || !selfSynced}
             onPress={() => void handleSubmit()}
           >
             <Text className="btn-primary__text">
@@ -258,7 +246,6 @@ type DayNoteInputProps = {
   isLocked: boolean;
 };
 
-/** The one optional note covering the whole day, above the item list. */
 function DayNoteInput({ value, onChangeText, isLocked }: DayNoteInputProps) {
   return (
     <View className="card gap-2">
@@ -286,13 +273,8 @@ function DayNoteInput({ value, onChangeText, isLocked }: DayNoteInputProps) {
 }
 
 const styles = StyleSheet.create({
-  list: {
-    flex: 1,
-  },
-  listContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 32,
-  },
+  list: { flex: 1 },
+  listContent: { paddingHorizontal: 16, paddingBottom: 32 },
   input: {
     minHeight: 88,
     borderWidth: 1,
