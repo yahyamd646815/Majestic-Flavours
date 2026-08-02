@@ -30,6 +30,9 @@ export default function Dashboard() {
   const isLoading = useInventoryStore((state) => state.isLoading);
   const error = useInventoryStore((state) => state.error);
   const fetchAll = useInventoryStore((state) => state.fetchAll);
+  const unitsLoading = useUnitsStore((state) => state.isLoading);
+  const unitsError = useUnitsStore((state) => state.error);
+  const fetchUnits = useUnitsStore((state) => state.fetchAll);
   const getLowStockItems = useInventoryStore((state) => state.getLowStockItems);
 
   if (role === "employee") return <Redirect href="/reports" />;
@@ -49,7 +52,8 @@ export default function Dashboard() {
 
   const alertItems = getLowStockItems();
 
-  const isEmptyAndLoading = isLoading && items.length === 0;
+  const combinedError = error ?? unitsError;
+  const isEmptyAndLoading = (isLoading || unitsLoading) && items.length === 0;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.white }}>
@@ -58,8 +62,14 @@ export default function Dashboard() {
         <Text className="mt-1 font-inter text-sm text-text-secondary">{today}</Text>
       </View>
 
-      {error !== null ? (
-        <ErrorState message={error} onRetry={() => void fetchAll(supabase)} />
+      {combinedError !== null ? (
+        <ErrorState
+          message={combinedError}
+          onRetry={() => {
+            void fetchAll(supabase);
+            void fetchUnits(supabase);
+          }}
+        />
       ) : isEmptyAndLoading ? (
         <LoadingState />
       ) : (

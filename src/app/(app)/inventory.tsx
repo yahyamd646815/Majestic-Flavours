@@ -30,6 +30,9 @@ export default function Inventory() {
   const isLoading = useInventoryStore((state) => state.isLoading);
   const error = useInventoryStore((state) => state.error);
   const fetchAll = useInventoryStore((state) => state.fetchAll);
+  const unitsLoading = useUnitsStore((state) => state.isLoading);
+  const unitsError = useUnitsStore((state) => state.error);
+  const fetchUnits = useUnitsStore((state) => state.fetchAll);
   const selectedCategoryId = useInventoryStore((state) => state.selectedCategoryId);
   const setSelectedCategoryId = useInventoryStore((state) => state.setSelectedCategoryId);
   const addItem = useInventoryStore((state) => state.addItem);
@@ -78,14 +81,15 @@ export default function Inventory() {
       ? await updateItem(supabase, editItem.id, values)
       : await addItem(supabase, values);
 
-    closeForm();
-
-    if (!succeeded) {
-      Alert.alert(
-        editItem ? "Could not save changes" : "Could not add item",
-        "The item was not saved. Check your connection and try again.",
-      );
+    if (succeeded) {
+      closeForm();
+      return;
     }
+
+    Alert.alert(
+      editItem ? "Could not save changes" : "Could not add item",
+      "The item was not saved. Check your connection and try again.",
+    );
   }
 
   async function handleDelete(item: InventoryItem) {
@@ -98,16 +102,23 @@ export default function Inventory() {
     }
   }
 
-  const isEmptyAndLoading = isLoading && items.length === 0;
-  const isReady = error === null && !isEmptyAndLoading;
+  const combinedError = error ?? unitsError;
+  const isEmptyAndLoading = (isLoading || unitsLoading) && items.length === 0;
+  const isReady = combinedError === null && !isEmptyAndLoading;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.white }}>
       <View className="flex-1 gap-4 pt-4">
         <Text className="px-4 font-inter-bold text-2xl text-maroon">Inventory</Text>
 
-        {error !== null ? (
-          <ErrorState message={error} onRetry={() => void fetchAll(supabase)} />
+        {combinedError !== null ? (
+          <ErrorState
+            message={combinedError}
+            onRetry={() => {
+              void fetchAll(supabase);
+              void fetchUnits(supabase);
+            }}
+          />
         ) : isEmptyAndLoading ? (
           <LoadingState />
         ) : (
