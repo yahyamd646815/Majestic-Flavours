@@ -1,13 +1,11 @@
-import { useAuth, useUser } from "@clerk/expo";
+import { useUser } from "@clerk/expo";
 import { Ionicons } from "@expo/vector-icons";
 import { Redirect } from "expo-router";
-import { useEffect } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { colors } from "@/constants/theme";
 import { getAssignedNames } from "@/lib/getAssignedNames";
-import { useSupabaseClient } from "@/lib/supabase";
 import { useInventoryStore } from "@/store/inventoryStore";
 import { parseRole } from "@/types/role";
 
@@ -22,39 +20,6 @@ export default function Dashboard() {
   const role = parseRole(user?.publicMetadata?.role);
   const items = useInventoryStore((state) => state.items);
   const getLowStockItems = useInventoryStore((state) => state.getLowStockItems);
-
-  // ---------------------------------------------------------------
-  // TEMPORARY (prompt 13a): verifies the Supabase connection and the
-  // Clerk -> Supabase auth wiring end to end. Delete this whole block
-  // once the log confirms both the token claims and the query.
-  // ---------------------------------------------------------------
-  const { getToken } = useAuth();
-  const supabase = useSupabaseClient();
-
-  useEffect(() => {
-    if (!__DEV__) return;
-
-    const check = async () => {
-      const token = await getToken();
-      if (!token) {
-        console.log("[supabase check] no Clerk session token yet");
-        return;
-      }
-
-      try {
-        const claims: unknown = JSON.parse(atob(token.split(".")[1]));
-        console.log("[supabase check] token claims:", claims);
-      } catch {
-        console.log("[supabase check] could not decode token claims");
-      }
-
-      const { data, error } = await supabase.from("categories").select("*");
-      console.log("[supabase check] categories:", { data, error });
-    };
-
-    check();
-  }, [getToken, supabase]);
-  // --------------------- end temporary block ---------------------
 
   if (role === "employee") return <Redirect href="/reports" />;
 
