@@ -15,12 +15,15 @@ import {
   reportMatchesCategory,
 } from "@/lib/reports";
 import { getUnitLabel } from "@/lib/inventoryLabels";
+import { useAppUsersStore } from "@/store/appUsersStore";
 import { useInventoryStore } from "@/store/inventoryStore";
 import { useReportStore } from "@/store/reportStore";
 import { useUnitsStore } from "@/store/unitsStore";
 import type { AppUser, InventoryItem, Report, Unit } from "@/types/inventory";
 
-const employees = sampleUsers.filter((user) => user.role === "employee");
+/** A `sampleUsers` entry paired with the Clerk id of the account that signed
+ * in under the same email, once such an account exists. */
+type ReporterCandidate = AppUser & { clerkUserId?: string };
 
 type ManagerReportsViewProps = {
   footer: ReactElement;
@@ -34,6 +37,7 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
   const items = useInventoryStore((state) => state.items);
   const categories = useInventoryStore((state) => state.categories);
   const units = useUnitsStore((state) => state.units);
+  const appUsers = useAppUsersStore((state) => state.users);
   const reports = useReportStore((state) => state.reports);
   const getReportForReporterAndDate = useReportStore(
     (state) => state.getReportForReporterAndDate,
@@ -46,23 +50,42 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
 
   const todayIsoDate = getTodayIsoDate();
 
+  // Roles still live only in `sampleUsers` on the client, but reports are
+  // keyed on real Clerk ids now — so bridge the two by email, the same
+  // deferred bridge the Reports screen uses for item scoping until 13d
+  // replaces the placeholder users outright. Someone who has never signed in
+  // simply has no Clerk id, and therefore no report.
+  const reporters = useMemo<ReporterCandidate[]>(
+    () =>
+      sampleUsers.map((sampleUser) => {
+        const synced = appUsers.find((appUser) => appUser.email === sampleUser.email);
+        return {
+          ...sampleUser,
+          name: synced?.name ?? sampleUser.name,
+          clerkUserId: synced?.clerkUserId,
+        };
+      }),
+    [appUsers],
+  );
+
   // Today's list is every Employee (expected to report) plus any Admin or
   // Manager who happens to have filed their own report today — not every
   // Admin/Manager, since self-reporting is optional for them, not expected
   // coverage the way it is for Employees.
   const todayReporterCandidates = useMemo(() => {
-    const selfReporters = sampleUsers.filter(
-      (user) =>
-        user.role !== "employee" &&
-        getReportForReporterAndDate(user.id, todayIsoDate) !== undefined,
+    const selfReporters = reporters.filter(
+      (reporter) =>
+        reporter.role !== "employee" &&
+        reporter.clerkUserId !== undefined &&
+        getReportForReporterAndDate(reporter.clerkUserId, todayIsoDate) !== undefined,
     );
-    return [...employees, ...selfReporters];
+    return [...reporters.filter((reporter) => reporter.role === "employee"), ...selfReporters];
     // `reports` looks unused to the linter, but `getReportForReporterAndDate`
     // reads it lazily through the store's `get()` — without it as a
     // dependency this memo would not recompute when someone submits or
     // updates today's report.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reports, getReportForReporterAndDate, todayIsoDate]);
+  }, [reports, reporters, getReportForReporterAndDate, todayIsoDate]);
 
   const todayRows = useMemo(
     () =>
@@ -70,7 +93,9 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
         .filter((reporter) => reporterId === null || reporter.id === reporterId)
         .map((reporter) => ({
           reporter,
-          report: getReportForReporterAndDate(reporter.id, todayIsoDate),
+          report: reporter.clerkUserId
+            ? getReportForReporterAndDate(reporter.clerkUserId, todayIsoDate)
+            : undefined,
         }))
         // With a category filter on: someone who has already reported stays
         // listed only if that report touched the category. An Employee who
@@ -96,19 +121,36 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
     ],
   );
 
+  // The filter chips carry `sampleUsers` ids; stored reports carry Clerk ids.
+  // `null` here means the selected person has never signed in, so nothing can
+  // match — which is exactly the right result.
+  const selectedReporterClerkId =
+    reporterId === null
+      ? null
+      : (reporters.find((reporter) => reporter.id === reporterId)?.clerkUserId ?? null);
+
   const historicalReports = useMemo(
     () =>
       reports
         .filter((report) => {
           if (!matchesDateFilter(report.date, dateFilter, todayIsoDate)) return false;
-          if (reporterId !== null && report.reporterId !== reporterId) return false;
+          if (reporterId !== null && report.reporterId !== selectedReporterClerkId)
+            return false;
           if (categoryId !== null && !reportMatchesCategory(report, items, categoryId))
             return false;
           return true;
         })
         // Newest first.
         .sort((a, b) => b.date.localeCompare(a.date)),
-    [reports, items, dateFilter, reporterId, categoryId, todayIsoDate],
+    [
+      reports,
+      items,
+      dateFilter,
+      reporterId,
+      selectedReporterClerkId,
+      categoryId,
+      todayIsoDate,
+    ],
   );
 
   const detailReport = reports.find((report) => report.id === detailReportId);
@@ -118,7 +160,7 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
       <ReportFilters
         dateFilter={dateFilter}
         onDateFilterChange={setDateFilter}
-        reporters={sampleUsers}
+        reporters={reporters}
         selectedReporterId={reporterId}
         onReporterChange={setReporterId}
         categories={categories}
@@ -160,7 +202,6 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
               items={items}
               categories={categories}
               units={units}
-              reporter={sampleUsers.find((user) => user.id === report.reporterId)}
               isLocked={isReportLocked(report, todayIsoDate)}
             />
           )}
@@ -173,7 +214,6 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
         items={items}
         categories={categories}
         units={units}
-        reporter={sampleUsers.find((user) => user.id === detailReport?.reporterId)}
         isLocked={detailReport ? isReportLocked(detailReport, todayIsoDate) : false}
         onClose={() => setDetailReportId(null)}
       />

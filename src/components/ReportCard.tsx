@@ -4,7 +4,8 @@ import { Text, View } from "react-native";
 import { colors } from "@/constants/theme";
 import { getCategoryName, getUnitLabel } from "@/lib/inventoryLabels";
 import { formatReportDate, formatSnapshotTime } from "@/lib/reports";
-import type { AppUser, Category, InventoryItem, Report, Unit } from "@/types/inventory";
+import { useAppUsersStore } from "@/store/appUsersStore";
+import type { Category, InventoryItem, Report, Unit } from "@/types/inventory";
 
 type ReportCardProps = {
   report: Report;
@@ -12,26 +13,24 @@ type ReportCardProps = {
   items: InventoryItem[];
   categories: Category[];
   units: Unit[];
-  /** Undefined when the report's author is no longer in the user list. */
-  reporter?: AppUser;
   isLocked: boolean;
 };
 
 /** One person's report for one day, as seen by Admins and Managers. */
-export function ReportCard({
-  report,
-  items,
-  categories,
-  units,
-  reporter,
-  isLocked,
-}: ReportCardProps) {
+export function ReportCard({ report, items, categories, units, isLocked }: ReportCardProps) {
+  // `reporterId` is a real Clerk id, so the name comes from the synced
+  // `app_users` directory — undefined only for someone whose row has not
+  // been synced yet.
+  const reporterName = useAppUsersStore(
+    (state) => state.users.find((user) => user.clerkUserId === report.reporterId)?.name,
+  );
+
   return (
     <View className="card gap-3">
       <View className="flex-row items-start justify-between gap-2">
         <View className="flex-1">
           <Text className="font-inter-semibold text-base text-text-primary">
-            {reporter?.name ?? "Unknown reporter"}
+            {reporterName ?? "Unknown reporter"}
           </Text>
           <Text className="font-inter text-xs text-text-secondary">
             {formatReportDate(report.date)}

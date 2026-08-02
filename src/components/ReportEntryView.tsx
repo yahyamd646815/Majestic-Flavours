@@ -16,7 +16,9 @@ import { useUnitsStore } from "@/store/unitsStore";
 import type { InventoryItem } from "@/types/inventory";
 
 type ReportEntryViewProps = {
-  /** The reporter's `sampleUsers` id — an Employee, or an Admin/Manager self-reporting. */
+  /** The reporter's real Clerk user id — an Employee, or an Admin/Manager
+   * self-reporting. This is what `reports.reporter_id` stores, and what RLS
+   * checks every write against. */
   reporterId: string;
   /** The items this person is reporting on. The caller decides the scope:
    * assigned items for an Employee, all items for Admin/Manager. */
@@ -128,16 +130,21 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
       });
     }
 
-    const result = submitReport(reporterId, todayIsoDate, dayContent.trim(), itemSubmissions);
+    const result = await submitReport(
+      supabase,
+      reporterId,
+      todayIsoDate,
+      dayContent.trim(),
+      itemSubmissions,
+    );
     if (result === null) {
-      Alert.alert(
-        "Report could not be saved",
-        "It looks like the day has changed. Please reopen the app and try again.",
-      );
+      Alert.alert("Report could not be saved", "Check your connection and try again.");
+      // Drafts are deliberately kept — nothing the person entered is lost, so
+      // they can simply press Report again.
       return;
     }
 
-    // Only now do the actual quantities land in Supabase.
+    // Only now do the actual quantities land on the inventory itself.
     const quantityUpdates = itemSubmissions.flatMap((submission) =>
       submission.newSnapshotQuantity === undefined
         ? []
@@ -150,15 +157,15 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
       ),
     );
 
-    clearDrafts();
+    clearDrafts(); // The report itself is safely saved in Supabase either way now.
 
-    // The report itself is stored locally until 13c, so it is already saved
-    // even when the inventory writes fail — say so plainly rather than
-    // showing the usual thank-you and leaving stale quantities unexplained.
-    if (writeResults.some((succeeded) => !succeeded)) {
+    const inventoryFailed = writeResults.some((succeeded) => !succeeded);
+    const reportPartiallyFailed = result.failedItemIds.length > 0;
+
+    if (inventoryFailed || reportPartiallyFailed) {
       Alert.alert(
-        "Inventory not fully updated",
-        "Your report was saved, but some quantities could not be sent to the server. Check your connection and report those items again.",
+        "Report saved with some issues",
+        "Some items could not be fully saved. Check your connection and try those items again.",
       );
       return;
     }

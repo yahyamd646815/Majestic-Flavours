@@ -7,7 +7,7 @@ import { StyleSheet } from "react-native";
 import { SplashScreen } from "@/components/SplashScreen";
 import { colors } from "@/constants/theme";
 import { DraftReportProvider } from "@/context/DraftReportContext";
-import { useInventorySync } from "@/hooks/useInventorySync";
+import { useSupabaseSync } from "@/hooks/useSupabaseSync";
 import { parseRole } from "@/types/role";
 
 const styles = StyleSheet.create({
@@ -28,10 +28,11 @@ export default function AppLayout() {
     if (hasNoRole) void signOut();
   }, [hasNoRole, signOut]);
 
-  // Loads inventory, categories and units from Supabase for this session. The
+  // Loads inventory, categories, units, reports and the user directory from
+  // Supabase for this session, and syncs this user's own `app_users` row. The
   // hook itself is a no-op unless genuinely signed in — it has to be called
   // above the early returns below to satisfy the rules of hooks.
-  useInventorySync(isSignedIn === true);
+  useSupabaseSync(isSignedIn === true);
 
   if (!isLoaded) return <SplashScreen />;
   if (!isSignedIn) return <Redirect href="/sign-in" />;
