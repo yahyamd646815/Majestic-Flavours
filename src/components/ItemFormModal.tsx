@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { sampleUsers } from "@/data/sampleUsers";
+import { useAppUsersStore } from "@/store/appUsersStore";
 import { useInventoryStore } from "@/store/inventoryStore";
 import { useUnitsStore } from "@/store/unitsStore";
 import type { InventoryItem } from "@/types/inventory";
@@ -16,11 +17,31 @@ type ItemFormModalProps = {
   onSubmit: (values: ItemFormValues) => void;
 };
 
-const employees = sampleUsers.filter((user) => user.role === "employee");
-
 export function ItemFormModal({ visible, item, onClose, onSubmit }: ItemFormModalProps) {
   const categories = useInventoryStore((state) => state.categories);
   const units = useUnitsStore((state) => state.units);
+  const appUsers = useAppUsersStore((state) => state.users);
+
+  // Roles live only in `sampleUsers` on the client, but assignments must be
+  // keyed on real Clerk ids — bridged by email, case-insensitively, same as
+  // ManagerReportsView. Prefer the real synced name when one exists, same as
+  // ManagerReportsView does — otherwise this shows the old placeholder name
+  // for someone whose real name is already known.
+  const assignableEmployees = useMemo(
+    () =>
+      sampleUsers
+        .filter((user) => user.role === "employee")
+        .map((sampleUser) => {
+          const targetEmail = sampleUser.email.toLowerCase();
+          const synced = appUsers.find((appUser) => appUser.email.toLowerCase() === targetEmail);
+          return {
+            ...sampleUser,
+            name: synced?.name ?? sampleUser.name,
+            clerkUserId: synced?.clerkUserId,
+          };
+        }),
+    [appUsers],
+  );
 
   // No useEffect-based reset here — the parent remounts this component (via a
   // changing `key`) each time it opens for a new item, so these initializers
@@ -179,17 +200,23 @@ export function ItemFormModal({ visible, item, onClose, onSubmit }: ItemFormModa
                   Assigned Employees
                 </Text>
                 <View className="flex-row flex-wrap gap-2">
-                  {employees.map((employee) => {
-                    const isActive = assignedEmployeeIds.includes(employee.id);
+                  {assignableEmployees.map((employee) => {
+                    const isDisabled = employee.clerkUserId === undefined;
+                    const isActive =
+                      !isDisabled && assignedEmployeeIds.includes(employee.clerkUserId!);
                     return (
                       <TouchableOpacity
                         key={employee.id}
-                        className={isActive ? "chip chip--active" : "chip"}
-                        activeOpacity={0.8}
-                        onPress={() => toggleEmployee(employee.id)}
+                        className={
+                          isActive ? "chip chip--active" : isDisabled ? "chip opacity-50" : "chip"
+                        }
+                        activeOpacity={isDisabled ? 1 : 0.8}
+                        disabled={isDisabled}
+                        onPress={() => toggleEmployee(employee.clerkUserId!)}
                       >
                         <Text className={isActive ? "chip__text chip__text--active" : "chip__text"}>
                           {employee.name}
+                          {isDisabled ? " (Hasn't signed in yet)" : ""}
                         </Text>
                       </TouchableOpacity>
                     );
