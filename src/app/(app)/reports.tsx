@@ -136,7 +136,7 @@ export default function Reports() {
           ) : (
             <ManagerReportsView footer={footer} />
           )
-        ) : reporterId !== null ? (
+        ) : role === "employee" && reporterId !== null ? (
           <ReportEntryView reporterId={reporterId} items={assignedItems} />
         ) : (
           <View className="flex-1 items-center gap-3 px-6 pt-12">

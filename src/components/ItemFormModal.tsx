@@ -21,12 +21,8 @@ export function ItemFormModal({ visible, item, onClose, onSubmit }: ItemFormModa
   const categories = useInventoryStore((state) => state.categories);
   const units = useUnitsStore((state) => state.units);
   const appUsers = useAppUsersStore((state) => state.users);
+  const appUsersLoading = useAppUsersStore((state) => state.isLoading);
 
-  // Roles live only in `sampleUsers` on the client, but assignments must be
-  // keyed on real Clerk ids — bridged by email, case-insensitively, same as
-  // ManagerReportsView. Prefer the real synced name when one exists, same as
-  // ManagerReportsView does — otherwise this shows the old placeholder name
-  // for someone whose real name is already known.
   const assignableEmployees = useMemo(
     () =>
       sampleUsers
@@ -43,9 +39,6 @@ export function ItemFormModal({ visible, item, onClose, onSubmit }: ItemFormModa
     [appUsers],
   );
 
-  // No useEffect-based reset here — the parent remounts this component (via a
-  // changing `key`) each time it opens for a new item, so these initializers
-  // running fresh on mount is all the "reset" that's needed.
   const [name, setName] = useState(item?.name ?? "");
   const [categoryId, setCategoryId] = useState<string | null>(
     item?.categoryId ?? categories[0]?.id ?? null,
@@ -65,6 +58,11 @@ export function ItemFormModal({ visible, item, onClose, onSubmit }: ItemFormModa
   }
 
   function handleSubmit() {
+    if (appUsersLoading) {
+      setError("Still loading employee data — please wait a moment and try again.");
+      return;
+    }
+
     const trimmedName = name.trim();
     const parsedQuantity = Number(quantity);
     const parsedThreshold = Number(minThreshold);
@@ -94,13 +92,27 @@ export function ItemFormModal({ visible, item, onClose, onSubmit }: ItemFormModa
       return;
     }
 
+    // Drop anything that isn't a currently-known real Clerk id — this is
+    // what actually purges leftover placeholder ids from before an item's
+    // assignments were last re-saved (prompt 13d), rather than silently
+    // carrying them forward alongside a newly-selected real one. Filtering
+    // here, at submit time rather than on mount, guarantees this always
+    // runs against the fully-loaded employee directory (Save is blocked
+    // above while it's still loading).
+    const knownClerkIds = new Set(
+      assignableEmployees
+        .map((employee) => employee.clerkUserId)
+        .filter((id): id is string => id !== undefined),
+    );
+    const cleanedAssignedEmployeeIds = assignedEmployeeIds.filter((id) => knownClerkIds.has(id));
+
     onSubmit({
       name: trimmedName,
       categoryId,
       currentQuantity: parsedQuantity,
       unitId,
       minThreshold: parsedThreshold,
-      assignedEmployeeIds,
+      assignedEmployeeIds: cleanedAssignedEmployeeIds,
     });
   }
 
@@ -234,7 +246,12 @@ export function ItemFormModal({ visible, item, onClose, onSubmit }: ItemFormModa
                 >
                   <Text className="font-inter-semibold text-base text-text-primary">Cancel</Text>
                 </TouchableOpacity>
-                <TouchableOpacity className="btn-primary flex-1" activeOpacity={0.85} onPress={handleSubmit}>
+                <TouchableOpacity
+                  className="btn-primary flex-1"
+                  activeOpacity={0.85}
+                  disabled={appUsersLoading}
+                  onPress={handleSubmit}
+                >
                   <Text className="btn-primary__text">Save</Text>
                 </TouchableOpacity>
               </View>

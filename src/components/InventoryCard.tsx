@@ -4,6 +4,7 @@ import { Text, TouchableOpacity, View } from "react-native";
 import { colors } from "@/constants/theme";
 import { getAssignedNames } from "@/lib/getAssignedNames";
 import { getCategoryName, getUnitLabel } from "@/lib/inventoryLabels";
+import { useAppUsersStore } from "@/store/appUsersStore";
 import type { Category, InventoryItem, Unit } from "@/types/inventory";
 
 type InventoryCardProps = {
@@ -24,6 +25,8 @@ export function InventoryCard({
   onEdit,
   onDelete,
 }: InventoryCardProps) {
+  const appUsers = useAppUsersStore((state) => state.users);
+
   const isOutOfStock = item.currentQuantity === 0;
   const isLowStock = !isOutOfStock && item.currentQuantity <= item.minThreshold;
 
@@ -39,7 +42,7 @@ export function InventoryCard({
       : "status-badge__text--in-stock";
   const statusLabel = isOutOfStock ? "Out of Stock" : isLowStock ? "Low Stock" : "In Stock";
 
-  const assignedNames = getAssignedNames(item.assignedEmployeeIds);
+  const assignedNames = getAssignedNames(item.assignedEmployeeIds, appUsers);
   const categoryName = getCategoryName(categories, item.categoryId);
   const unitLabel = getUnitLabel(units, item.unitId);
 
