@@ -10,6 +10,7 @@ import { colors } from "@/constants/theme";
 import { getAssignedNames } from "@/lib/getAssignedNames";
 import { getCategoryName, getUnitLabel } from "@/lib/inventoryLabels";
 import { useSupabaseClient } from "@/lib/supabase";
+import { useAppUsersStore } from "@/store/appUsersStore";
 import { useInventoryStore } from "@/store/inventoryStore";
 import { useUnitsStore } from "@/store/unitsStore";
 import { parseRole } from "@/types/role";
@@ -27,6 +28,7 @@ export default function Dashboard() {
   const items = useInventoryStore((state) => state.items);
   const categories = useInventoryStore((state) => state.categories);
   const units = useUnitsStore((state) => state.units);
+  const appUsers = useAppUsersStore((state) => state.users);
   const isLoading = useInventoryStore((state) => state.isLoading);
   const error = useInventoryStore((state) => state.error);
   const fetchAll = useInventoryStore((state) => state.fetchAll);
@@ -114,7 +116,7 @@ export default function Dashboard() {
                     const badgeTextClass = isOutOfStock
                       ? "status-badge__text--out-of-stock"
                       : "status-badge__text--low-stock";
-                    const assignedNames = getAssignedNames(item.assignedEmployeeIds);
+                    const assignedNames = getAssignedNames(item.assignedEmployeeIds, appUsers);
 
                     return (
                       <View key={item.id} className="card gap-2">

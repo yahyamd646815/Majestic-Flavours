@@ -9,7 +9,6 @@ import { LoadingState } from "@/components/LoadingState";
 import { ManagerReportsView } from "@/components/ManagerReportsView";
 import { ReportEntryView } from "@/components/ReportEntryView";
 import { colors } from "@/constants/theme";
-import { sampleUsers } from "@/data/sampleUsers";
 import { useSupabaseClient } from "@/lib/supabase";
 import { useInventoryStore } from "@/store/inventoryStore";
 import { useReportStore } from "@/store/reportStore";
@@ -39,17 +38,12 @@ export default function Reports() {
 
   const reporterId = user?.id ?? null;
 
-  const currentEmail = user?.primaryEmailAddress?.emailAddress;
-  const currentSampleUser = sampleUsers.find((sampleUser) => sampleUser.email === currentEmail);
-
   const [isSelfReporting, setIsSelfReporting] = useState(false);
 
   const assignedItems = useMemo(
     () =>
-      currentSampleUser
-        ? items.filter((item) => item.assignedEmployeeIds.includes(currentSampleUser.id))
-        : [],
-    [items, currentSampleUser],
+      reporterId ? items.filter((item) => item.assignedEmployeeIds.includes(reporterId)) : [],
+    [items, reporterId],
   );
 
   const footer = <View className="pt-6" />;
@@ -142,7 +136,7 @@ export default function Reports() {
           ) : (
             <ManagerReportsView footer={footer} />
           )
-        ) : reporterId !== null && currentSampleUser ? (
+        ) : role === "employee" && reporterId !== null ? (
           <ReportEntryView reporterId={reporterId} items={assignedItems} />
         ) : (
           <View className="flex-1 items-center gap-3 px-6 pt-12">
