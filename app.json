@@ -48,7 +48,9 @@
         }
       ],
       "@clerk/expo",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-sharing",
+      "expo-file-system"
     ],
     "experiments": {
       "typedRoutes": true,
