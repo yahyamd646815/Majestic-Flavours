@@ -2,13 +2,10 @@ import type { ReactNode } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import type { ReportDateFilter } from "@/lib/reports";
+import { REPORT_DATE_FILTER_LABELS } from "@/lib/reports";
 import type { AppUser, Category } from "@/types/inventory";
 
-const DATE_FILTERS: { id: ReportDateFilter; label: string }[] = [
-  { id: "today", label: "Today" },
-  { id: "week", label: "This Week" },
-  { id: "all", label: "All Time" },
-];
+const DATE_FILTERS: ReportDateFilter[] = ["today", "week", "all"];
 
 type ReportFiltersProps = {
   dateFilter: ReportDateFilter;
@@ -38,10 +35,10 @@ export function ReportFilters({
       <FilterRow label="Date">
         {DATE_FILTERS.map((filter) => (
           <FilterChip
-            key={filter.id}
-            label={filter.label}
-            isActive={dateFilter === filter.id}
-            onPress={() => onDateFilterChange(filter.id)}
+            key={filter}
+            label={REPORT_DATE_FILTER_LABELS[filter]}
+            isActive={dateFilter === filter}
+            onPress={() => onDateFilterChange(filter)}
           />
         ))}
       </FilterRow>

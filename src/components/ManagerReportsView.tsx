@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { type ReactElement, useMemo, useState } from "react";
-import { FlatList, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import { ReportCard } from "@/components/ReportCard";
 import { ReportDetailModal } from "@/components/ReportDetailModal";
@@ -8,8 +8,11 @@ import { ReportFilters } from "@/components/ReportFilters";
 import { colors } from "@/constants/theme";
 import { sampleUsers } from "@/data/sampleUsers";
 import { getUnitLabel } from "@/lib/inventoryLabels";
+import type { ReportExportInput } from "@/lib/reportExport";
+import { exportReportsAsPdf, exportReportsAsXlsx } from "@/lib/reportExport";
 import type { ReportDateFilter } from "@/lib/reports";
 import {
+  REPORT_DATE_FILTER_LABELS,
   getTodayIsoDate,
   isReportLocked,
   matchesDateFilter,
@@ -25,9 +28,11 @@ type ReporterCandidate = AppUser & { clerkUserId?: string };
 
 type ManagerReportsViewProps = {
   footer: ReactElement;
+  /** Switches the Reports screen over to the signed-in user's own report. */
+  onSelfReport: () => void;
 };
 
-export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
+export function ManagerReportsView({ footer, onSelfReport }: ManagerReportsViewProps) {
   const items = useInventoryStore((state) => state.items);
   const categories = useInventoryStore((state) => state.categories);
   const units = useUnitsStore((state) => state.units);
@@ -41,6 +46,7 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
   const [reporterId, setReporterId] = useState<string | null>(null);
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [detailReportId, setDetailReportId] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
 
   const todayIsoDate = getTodayIsoDate();
 
@@ -124,8 +130,76 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
 
   const detailReport = reports.find((report) => report.id === detailReportId);
 
+  const filterSummary = [
+    REPORT_DATE_FILTER_LABELS[dateFilter],
+    reporterId === null
+      ? "All reporters"
+      : (reporters.find((reporter) => reporter.id === reporterId)?.name ?? "Unknown reporter"),
+    categoryId === null
+      ? "All categories"
+      : (categories.find((category) => category.id === categoryId)?.name ?? "Unknown category"),
+  ].join(" · ");
+
+  // `historicalReports` already applies all three filters for every date
+  // filter — including "today", where the list itself renders the roster-based
+  // `todayRows` instead. So it is the right export set in all cases.
+  const runExport = async (exporter: (input: ReportExportInput) => Promise<void>) => {
+    if (historicalReports.length === 0) {
+      Alert.alert("Nothing to export", "No reports match the current filters.");
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      await exporter({
+        reports: historicalReports,
+        items,
+        categories,
+        units,
+        appUsers,
+        filterSummary,
+      });
+    } catch (error) {
+      console.warn("[ManagerReportsView] Report export failed:", error);
+      Alert.alert("Export failed", "Please try again.");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <View className="flex-1 gap-4">
+      <View className="flex-row flex-wrap items-center justify-between gap-2 px-4">
+        <Text className="font-inter-bold text-2xl text-maroon">Reports</Text>
+
+        <View className="flex-row flex-wrap items-center gap-2">
+          <TouchableOpacity
+            className="flex-row items-center gap-1 rounded-lg bg-gold px-3 py-2"
+            activeOpacity={0.8}
+            onPress={onSelfReport}
+            accessibilityRole="button"
+            accessibilityLabel="Make a report"
+          >
+            <Ionicons name="add" size={14} color={colors.textPrimary} />
+            <Text className="font-inter-semibold text-xs text-text-primary">Make a Report</Text>
+          </TouchableOpacity>
+
+          <ExportButton
+            label="PDF"
+            accessibilityLabel="Export reports as PDF"
+            disabled={isExporting}
+            onPress={() => void runExport(exportReportsAsPdf)}
+          />
+
+          <ExportButton
+            label="XLSX"
+            accessibilityLabel="Export reports as XLSX"
+            disabled={isExporting}
+            onPress={() => void runExport(exportReportsAsXlsx)}
+          />
+        </View>
+      </View>
+
       <ReportFilters
         dateFilter={dateFilter}
         onDateFilterChange={setDateFilter}
@@ -187,6 +261,31 @@ export function ManagerReportsView({ footer }: ManagerReportsViewProps) {
         onClose={() => setDetailReportId(null)}
       />
     </View>
+  );
+}
+
+type ExportButtonProps = {
+  label: string;
+  accessibilityLabel: string;
+  disabled: boolean;
+  onPress: () => void;
+};
+
+function ExportButton({ label, accessibilityLabel, disabled, onPress }: ExportButtonProps) {
+  return (
+    <TouchableOpacity
+      className="flex-row items-center gap-1 rounded-lg border border-border px-3 py-2"
+      style={{ opacity: disabled ? 0.5 : 1 }}
+      activeOpacity={0.8}
+      disabled={disabled}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ disabled }}
+    >
+      <Ionicons name="download-outline" size={14} color={colors.maroon} />
+      <Text className="font-inter-semibold text-xs text-maroon">{label}</Text>
+    </TouchableOpacity>
   );
 }
 

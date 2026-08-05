@@ -58,6 +58,12 @@ export function reportMatchesCategory(
 
 export type ReportDateFilter = "today" | "week" | "all";
 
+export const REPORT_DATE_FILTER_LABELS: Record<ReportDateFilter, string> = {
+  today: "Today",
+  week: "This Week",
+  all: "All Time",
+};
+
 /** `"week"` means the last 7 days, today included. */
 export function matchesDateFilter(
   isoDate: string,

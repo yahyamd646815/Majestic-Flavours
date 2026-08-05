@@ -1,7 +1,7 @@
 import { useUser } from "@clerk/expo";
 import { Ionicons } from "@expo/vector-icons";
 import { useMemo, useState } from "react";
-import { Alert, Text, TouchableOpacity, View } from "react-native";
+import { Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ErrorState } from "@/components/ErrorState";
@@ -14,10 +14,6 @@ import { useInventoryStore } from "@/store/inventoryStore";
 import { useReportStore } from "@/store/reportStore";
 import { useUnitsStore } from "@/store/unitsStore";
 import { parseRole } from "@/types/role";
-
-function showExportComingSoon() {
-  Alert.alert("Coming soon", "Export will be available in a future update.");
-}
 
 export default function Reports() {
   const { user } = useUser();
@@ -56,68 +52,35 @@ export default function Reports() {
   const isEmptyAndLoading =
     (isLoading && items.length === 0) || unitsLoading || reportsLoading;
 
+  // While an Admin or Manager is browsing, `ManagerReportsView` owns the
+  // header — it holds the filters the export buttons depend on. Every other
+  // state (self-reporting, employee, loading, error) still needs one here.
+  const isBrowsingAllReports =
+    canViewAllReports && !isSelfReporting && combinedError === null && !isEmptyAndLoading;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.white }}>
       <View className="flex-1 gap-4 pt-4">
-        <View className="flex-row flex-wrap items-center justify-between gap-2 px-4">
-          <Text className="font-inter-bold text-2xl text-maroon">
-            {isSelfReporting ? "My Report" : "Reports"}
-          </Text>
+        {isBrowsingAllReports ? null : (
+          <View className="flex-row flex-wrap items-center justify-between gap-2 px-4">
+            <Text className="font-inter-bold text-2xl text-maroon">
+              {isSelfReporting ? "My Report" : "Reports"}
+            </Text>
 
-          {canViewAllReports ? (
-            <View className="flex-row flex-wrap items-center gap-2">
-              {isSelfReporting ? (
-                <TouchableOpacity
-                  className="flex-row items-center gap-1 rounded-lg border border-border px-3 py-2"
-                  activeOpacity={0.8}
-                  onPress={() => setIsSelfReporting(false)}
-                  accessibilityRole="button"
-                  accessibilityLabel="Back to all reports"
-                >
-                  <Ionicons name="chevron-back" size={14} color={colors.maroon} />
-                  <Text className="font-inter-semibold text-xs text-maroon">Back to Reports</Text>
-                </TouchableOpacity>
-              ) : (
-                <>
-                  <TouchableOpacity
-                    className="flex-row items-center gap-1 rounded-lg bg-gold px-3 py-2"
-                    activeOpacity={0.8}
-                    onPress={() => setIsSelfReporting(true)}
-                    accessibilityRole="button"
-                    accessibilityLabel="Make a report"
-                  >
-                    <Ionicons name="add" size={14} color={colors.textPrimary} />
-                    <Text className="font-inter-semibold text-xs text-text-primary">
-                      Make a Report
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    className="flex-row items-center gap-1 rounded-lg border border-border px-3 py-2"
-                    activeOpacity={0.8}
-                    onPress={showExportComingSoon}
-                    accessibilityRole="button"
-                    accessibilityLabel="Export reports as PDF"
-                  >
-                    <Ionicons name="download-outline" size={14} color={colors.maroon} />
-                    <Text className="font-inter-semibold text-xs text-maroon">PDF</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    className="flex-row items-center gap-1 rounded-lg border border-border px-3 py-2"
-                    activeOpacity={0.8}
-                    onPress={showExportComingSoon}
-                    accessibilityRole="button"
-                    accessibilityLabel="Export reports as XLSX"
-                  >
-                    <Ionicons name="download-outline" size={14} color={colors.maroon} />
-                    <Text className="font-inter-semibold text-xs text-maroon">XLSX</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-            </View>
-          ) : null}
-        </View>
+            {canViewAllReports && isSelfReporting ? (
+              <TouchableOpacity
+                className="flex-row items-center gap-1 rounded-lg border border-border px-3 py-2"
+                activeOpacity={0.8}
+                onPress={() => setIsSelfReporting(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Back to all reports"
+              >
+                <Ionicons name="chevron-back" size={14} color={colors.maroon} />
+                <Text className="font-inter-semibold text-xs text-maroon">Back to Reports</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        )}
 
         {combinedError !== null ? (
           <ErrorState
@@ -134,7 +97,7 @@ export default function Reports() {
           isSelfReporting && reporterId !== null ? (
             <ReportEntryView reporterId={reporterId} items={items} />
           ) : (
-            <ManagerReportsView footer={footer} />
+            <ManagerReportsView footer={footer} onSelfReport={() => setIsSelfReporting(true)} />
           )
         ) : role === "employee" && reporterId !== null ? (
           <ReportEntryView reporterId={reporterId} items={assignedItems} />
