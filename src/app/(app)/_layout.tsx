@@ -7,6 +7,7 @@ import { StyleSheet } from "react-native";
 import { SplashScreen } from "@/components/SplashScreen";
 import { colors } from "@/constants/theme";
 import { DraftReportProvider } from "@/context/DraftReportContext";
+import { useReportCleanup } from "@/hooks/useReportCleanup";
 import { useSupabaseSync } from "@/hooks/useSupabaseSync";
 import { parseRole } from "@/types/role";
 
@@ -33,6 +34,11 @@ export default function AppLayout() {
   // hook itself is a no-op unless genuinely signed in — it has to be called
   // above the early returns below to satisfy the rules of hooks.
   useSupabaseSync(isSignedIn === true);
+
+  // Drops reports past the 4-month retention window (AGENTS.md → Report
+  // Rules). Admin-only and silent; same placement, above the early returns,
+  // for the same rules-of-hooks reason.
+  useReportCleanup(isSignedIn === true);
 
   if (!isLoaded) return <SplashScreen />;
   if (!isSignedIn) return <Redirect href="/sign-in" />;
