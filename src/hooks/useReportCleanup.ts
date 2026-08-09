@@ -1,5 +1,5 @@
-import { useUser } from "@clerk/expo";
-import { useEffect } from "react";
+import { useAuth, useUser } from "@clerk/expo";
+import { useEffect, useRef } from "react";
 
 import { getTodayIsoDate } from "@/lib/reports";
 import { useSupabaseClient } from "@/lib/supabase";
@@ -20,18 +20,28 @@ function getCutoffIsoDate(): string {
 
 /**
  * Deletes reports older than 4 months, once per signed-in admin session.
- * Silent by design — no loading state, no UI, console logging only. Only
- * ever runs for an admin: both because deletion is scoped that way in RLS
- * (see round7), and so a non-admin session doesn't attempt a request that
- * would just be rejected every time.
+ * Silent by design — no loading state, no UI, console logging only.
+ *
+ * Keyed on Clerk's `sessionId` (via a ref), not just `isSignedIn`/`role` —
+ * those two alone could re-run cleanup a second time if an admin's role
+ * flickers off and back on mid-session (e.g. a role correction elsewhere
+ * while this session is still open), and wouldn't catch a switch to a
+ * different already-authenticated admin session if one ever happened
+ * without an intervening sign-out. The ref guarantees at most one run per
+ * distinct sessionId, regardless of how many times role or isSignedIn
+ * happen to toggle around it.
  */
 export function useReportCleanup(isSignedIn: boolean) {
+  const { sessionId } = useAuth();
   const { user } = useUser();
   const supabase = useSupabaseClient();
   const role = parseRole(user?.publicMetadata?.role);
+  const lastRunSessionId = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!isSignedIn || role !== "admin") return;
+    if (!isSignedIn || role !== "admin" || !sessionId) return;
+    if (lastRunSessionId.current === sessionId) return;
+    lastRunSessionId.current = sessionId;
 
     const cutoff = getCutoffIsoDate();
     void supabase
@@ -48,8 +58,5 @@ export function useReportCleanup(isSignedIn: boolean) {
           `[useReportCleanup] Deleted ${data?.length ?? 0} report(s) older than ${cutoff}.`,
         );
       });
-    // Deliberately runs once per signed-in admin session, not on every
-    // screen visit — `isSignedIn`/`role` are the only real dependencies.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSignedIn, role]);
+  }, [sessionId, role, isSignedIn, supabase]);
 }
