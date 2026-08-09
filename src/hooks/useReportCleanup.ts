@@ -1,14 +1,3 @@
-Read AGENTS.md first and follow it strictly.
-
-## Task
-
-Implement automatic deletion of reports older than 4 months, admin-only, running silently once per signed-in admin session.
-
-**Prerequisite, not part of this prompt:** `supabase-patch-round7.sql` must already be applied. Without it, every delete attempt this prompt implements will fail — no table currently has any DELETE policy, and a cascade delete still needs RLS permission on the child tables it touches, not just the parent.
-
-### 1. `src/hooks/useReportCleanup.ts`
-
-```ts
 import { useAuth, useUser } from "@clerk/expo";
 import { useEffect, useRef } from "react";
 
@@ -71,19 +60,3 @@ export function useReportCleanup(isSignedIn: boolean) {
       });
   }, [sessionId, role, isSignedIn, supabase]);
 }
-```
-
-### 2. Wire it into `src/app/(app)/_layout.tsx`
-
-Call `useReportCleanup(isSignedIn === true)` once, alongside the existing `useSupabaseSync` call — same placement, above the early returns, for the same rules-of-hooks reason.
-
-## Constraints
-
-- No loading state, no UI of any kind — console only, exactly as specified.
-- Do not update `reportStore`'s local `reports` array after a successful cleanup. This is a deliberate, minor limitation, not an oversight: an admin browsing "All Time" for the remainder of that session might still see an already-deleted report until the next natural refetch. Reconciling this isn't worth the complexity for something this infrequent and low-stakes.
-- Strict TypeScript, no `any`.
-- Run `npm run lint` and `npm run typecheck` before finishing. Fix all errors.
-
-## Reference
-
-To actually test deletion (not just confirm it doesn't error), you'll need at least one report dated more than 4 months back — the fastest way is editing a test report's `date` column directly in Supabase's Table Editor, then signing in as admin and confirming the console log reports it deleted, followed by a manual check that the row (and its child rows) are genuinely gone.
