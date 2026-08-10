@@ -1,6 +1,7 @@
 import { useUser } from "@clerk/expo";
 import { Ionicons } from "@expo/vector-icons";
 import { Redirect } from "expo-router";
+import { usePostHog } from "posthog-react-native";
 import { useMemo, useState } from "react";
 import { Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -13,6 +14,7 @@ import { ItemFormModal, type ItemFormValues } from "@/components/ItemFormModal";
 import { LoadingState } from "@/components/LoadingState";
 import { SearchBar } from "@/components/SearchBar";
 import { colors } from "@/constants/theme";
+import { getCategoryName } from "@/lib/inventoryLabels";
 import { useSupabaseClient } from "@/lib/supabase";
 import { useInventoryStore } from "@/store/inventoryStore";
 import { useUnitsStore } from "@/store/unitsStore";
@@ -38,6 +40,7 @@ export default function Inventory() {
   const addItem = useInventoryStore((state) => state.addItem);
   const updateItem = useInventoryStore((state) => state.updateItem);
   const deleteItem = useInventoryStore((state) => state.deleteItem);
+  const posthog = usePostHog();
 
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editItem, setEditItem] = useState<InventoryItem | null>(null);
@@ -92,6 +95,7 @@ export default function Inventory() {
     );
   }
 
+  // Reached only after DeleteConfirmModal's two-step confirmation passes.
   async function handleDelete(item: InventoryItem) {
     const succeeded = await deleteItem(supabase, item.id);
     if (!succeeded) {
@@ -99,7 +103,15 @@ export default function Inventory() {
         "Could not delete item",
         "The item was not deleted. Check your connection and try again.",
       );
+      return;
     }
+
+    // Items store `categoryId`, so the category is resolved to its name here —
+    // a raw id would be meaningless in PostHog.
+    posthog.capture("inventory_item_deleted", {
+      item_name: item.name,
+      category: getCategoryName(categories, item.categoryId),
+    });
   }
 
   const combinedError = error ?? unitsError;

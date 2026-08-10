@@ -3,7 +3,10 @@ import { tokenCache } from "@clerk/expo/token-cache";
 import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
+import { PostHogProvider } from "posthog-react-native";
 import { useEffect } from "react";
+
+import { posthogApiKey, posthogHost } from "@/lib/posthog";
 
 import "@/global.css";
 
@@ -36,8 +39,13 @@ export default function RootLayout() {
   }
 
   return (
-    <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache}>
-      <Stack screenOptions={{ headerShown: false }} />
-    </ClerkProvider>
+    // Outermost, above ClerkProvider: the SDK initializes exactly once for the
+    // app's whole lifetime, before auth state is even known. This is the only
+    // PostHog client in the app — everything else uses `usePostHog()`.
+    <PostHogProvider apiKey={posthogApiKey} options={{ host: posthogHost }}>
+      <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache}>
+        <Stack screenOptions={{ headerShown: false }} />
+      </ClerkProvider>
+    </PostHogProvider>
   );
 }

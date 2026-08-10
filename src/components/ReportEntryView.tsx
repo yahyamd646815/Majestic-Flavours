@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { usePostHog } from "posthog-react-native";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
@@ -30,6 +31,7 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
   const units = useUnitsStore((state) => state.units);
   const submitReport = useReportStore((state) => state.submitReport);
   const selfSynced = useAppUsersStore((state) => state.selfSynced);
+  const posthog = usePostHog();
   const todaysReport = useReportStore((state) =>
     state.getReportForReporterAndDate(reporterId, todayIsoDate),
   );
@@ -121,6 +123,17 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
         Alert.alert("Report could not be saved", "Check your connection and try again.");
         return;
       }
+
+      // Fires here, once the report itself is genuinely saved — not on a null
+      // result (locked or wrong-day report). One report covers many items and
+      // any role can file one, so this counts items and names the reporter
+      // rather than recording a single item or assuming an employee.
+      posthog.capture("report_submitted", {
+        reporter_id: reporterId,
+        date: todayIsoDate,
+        items_changed_count: itemSubmissions.length,
+        has_day_note: dayContent.trim().length > 0,
+      });
 
       const quantityUpdates = itemSubmissions.flatMap((submission) =>
         submission.newSnapshotQuantity === undefined

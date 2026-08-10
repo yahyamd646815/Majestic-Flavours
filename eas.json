@@ -6,10 +6,20 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "APP_VARIANT": "development"
+      }
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_aW5jbHVkZWQtc2hlcGhlcmQtMi5jbGVyay5hY2NvdW50cy5kZXYk",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://edwyjqwpgoeaobreunpd.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVkd3lqcXdwZ29lYW9icmV1bnBkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU0MzQ2MDksImV4cCI6MjEwMTAxMDYwOX0.bgOyzP0lFtpiqGr_mHpfXFe0u8qcFLnwsJI7j0j4WSw",
+        "EXPO_PUBLIC_POSTHOG_API_KEY": "phc_sZKmo7g8ABi9TMZ6vZAXNdkY5MwVyWqSEbTVSwVhM8D6",
+        "EXPO_PUBLIC_POSTHOG_HOST": "https://eu.i.posthog.com"
+      }
     },
     "production": {
       "autoIncrement": true

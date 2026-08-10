@@ -7,6 +7,7 @@ import { StyleSheet } from "react-native";
 import { SplashScreen } from "@/components/SplashScreen";
 import { colors } from "@/constants/theme";
 import { DraftReportProvider } from "@/context/DraftReportContext";
+import { useAnalyticsIdentify } from "@/hooks/useAnalyticsIdentify";
 import { useReportCleanup } from "@/hooks/useReportCleanup";
 import { useSupabaseSync } from "@/hooks/useSupabaseSync";
 import { parseRole } from "@/types/role";
@@ -39,6 +40,10 @@ export default function AppLayout() {
   // Rules). Admin-only and silent; same placement, above the early returns,
   // for the same rules-of-hooks reason.
   useReportCleanup(isSignedIn === true);
+
+  // Identifies this person to PostHog and captures `user_signed_in`, once per
+  // session. Same placement and same rules-of-hooks reason as the two above.
+  useAnalyticsIdentify(isSignedIn === true);
 
   if (!isLoaded) return <SplashScreen />;
   if (!isSignedIn) return <Redirect href="/sign-in" />;
