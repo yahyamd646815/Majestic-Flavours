@@ -1,6 +1,8 @@
 import { useUser } from "@clerk/expo";
 import { Ionicons } from "@expo/vector-icons";
 import { Redirect } from "expo-router";
+import { usePostHog } from "posthog-react-native";
+import { useEffect, useRef } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -36,6 +38,24 @@ export default function Dashboard() {
   const unitsError = useUnitsStore((state) => state.error);
   const fetchUnits = useUnitsStore((state) => state.fetchAll);
   const getLowStockItems = useInventoryStore((state) => state.getLowStockItems);
+
+  const posthog = usePostHog();
+  const hasCapturedLowStockView = useRef(false);
+
+  // Fires at most once per Dashboard mount, the first time this screen has at
+  // least one low-stock item to show. It depends on `items` rather than firing
+  // on mount alone because inventory arrives asynchronously from Supabase —
+  // on the very first render the list is still empty, so a mount-only effect
+  // would report zero and never correct itself. Employees are excluded: they
+  // are redirected below and never actually see this screen, but the effect
+  // would still run on the render that returns the redirect.
+  useEffect(() => {
+    if (role === "employee" || hasCapturedLowStockView.current) return;
+    const lowStockCount = getLowStockItems().length;
+    if (lowStockCount === 0) return;
+    hasCapturedLowStockView.current = true;
+    posthog.capture("low_stock_alert_viewed", { low_stock_count: lowStockCount });
+  }, [items, role, getLowStockItems, posthog]);
 
   if (role === "employee") return <Redirect href="/reports" />;
 
