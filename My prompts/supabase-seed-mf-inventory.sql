@@ -24,7 +24,16 @@
 -- run even if some of these already exist in your live database.
 -- Items are NOT deduped this way (items have no natural unique key)
 -- — only run the item-insert section once.
+--
+-- Wrapped in an explicit transaction: without one, a failure partway
+-- through the 144 item inserts could leave some committed and others
+-- not, with no clean way to tell where it stopped. BEGIN/COMMIT makes
+-- this all-or-nothing regardless of how the SQL Editor happens to
+-- submit the statements — if anything fails, everything rolls back
+-- and nothing needs to be manually cleaned up before trying again.
 -- ============================================================
+
+begin;
 
 -- ---------- 1. Units (idempotent) ----------
 insert into units (id, label)
@@ -1548,3 +1557,5 @@ values (
   0,
   '{}'
 );
+
+commit;
