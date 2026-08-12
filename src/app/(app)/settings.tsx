@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { CheckForUpdatesRow } from "@/components/CheckForUpdatesRow";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
 import { SettingsListSection } from "@/components/SettingsListSection";
@@ -181,6 +182,8 @@ export default function Settings() {
           ) : null}
 
           {role === "manager" ? renderCategoriesSection(false) : null}
+
+          <CheckForUpdatesRow />
 
           <TouchableOpacity
             className="btn-primary"

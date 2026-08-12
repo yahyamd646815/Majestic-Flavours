@@ -49,10 +49,17 @@ module.exports = {
       "expo-sharing",
       "expo-file-system",
       "expo-localization",
+      "expo-updates",
     ],
     experiments: {
       typedRoutes: true,
       reactCompiler: true,
+    },
+    updates: {
+      url: "https://u.expo.dev/23fd4d8b-a07c-429b-880c-9f90d56e86b8",
+    },
+    runtimeVersion: {
+      policy: "fingerprint",
     },
     extra: {
       router: {},

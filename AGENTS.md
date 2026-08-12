@@ -14,7 +14,7 @@ The app manages stock levels across the restaurant, with role-based access, low-
 
 Core features:
 - Three-tier role-based access: Admin, Manager, Employee
-- Inventory items with flexible units, categories, and one or more assigned employees per item (no fixed minimum or maximum)
+- Inventory items with flexible units, categories, and 2 to 3 assigned employees per item
 - Low-stock threshold alerts visible to Admins and Managers
 - Daily text-based reports submitted by employees, editable until midnight and locked after
 - Monthly report export as PDF and XLSX
@@ -31,11 +31,13 @@ This is a private app, not publicly listed. Users access it via a private link o
 - TypeScript — language
 - Expo Router — file-based navigation
 - NativeWind v5 / Tailwind CSS — styling
-- Zustand — global state management
-- AsyncStorage — local persistence
+- Zustand — global state, **in-memory only** (see State Management Rules — this changed from the original plan)
 - Clerk — authentication and role-based user management
-- Supabase — PostgreSQL database and backend
+- Supabase — PostgreSQL database, RLS, and backend (authoritative — see Supabase Rules)
 - PostHog — product analytics
+- `expo-updates` — OTA delivery of JS-only changes to the `preview` build (added after v1; native changes still require a full rebuild regardless)
+- Jest + `jest-expo` — test infrastructure (added after v1; not yet covering the whole codebase, only specific modules as tests are written for them)
+- EAS Build — distribution, via `development` and `preview` profiles (`preview` is what real staff actually run)
 
 Do not introduce new major libraries unless there is a strong reason. Ask before installing anything new.
 
@@ -74,27 +76,33 @@ Do not install or use new libraries without user approval.
 
 ## Architecture
 
-All app code lives under `src/`. Import via the `@/` alias, which resolves to `src/*` (see `tsconfig.json`). Do not create top-level `app/`, `components/`, `data/`, etc. folders outside `src/` — this has caused real path/import bugs before.
-
-Current structure:
+Use this folder structure — this is the structure the project actually settled into, not the original plan (see note below):
 
 ```
 src/
   app/
-    (auth)/       — sign-in and other unauthenticated screens
-    (app)/        — all authenticated tab screens (Dashboard, Inventory,
-                     Reports, Users, Settings) and their shared layout/guard
+    (auth)/
+      sign-in.tsx
+    (app)/
+      _layout.tsx        # Tabs, role-gated per screen
+      index.tsx           # Dashboard
+      inventory.tsx
+      reports.tsx
+      users.tsx
+      settings.tsx
+    _layout.tsx           # root: fonts, ClerkProvider, PostHogProvider
   components/
   constants/
+  context/
   data/
   hooks/
   lib/
   store/
   types/
-  assets/
+assets/
 ```
 
-Nested routes (for example, an item detail screen under Inventory) may be added under `(app)/` in later prompts as the app grows — keep it flat until there's an actual need for nesting.
+Everything lives under `src/`. Screens are flat files directly under `(app)/`, not nested route folders per feature — `inventory.tsx` and `reports.tsx` are single files, not `inventory/` and `reports/` directories. The tab group is named `(app)`, not `(tabs)`.
 
 **app/** — routes and screens only. Screens compose components and call hooks or stores. No large UI blocks or business logic here.
 
@@ -105,21 +113,21 @@ Do not create tiny one-off components too early.
 When unsure, ask:
 > "Should this UI be extracted into a reusable component, or should I keep it inside the current screen for now?"
 
-**store/** — Zustand stores for inventory state, report data, and local UI preferences (e.g. the selected category filter). Persist with AsyncStorage where it genuinely benefits the user (e.g. reports, filter preference) — do not persist data that is only ever re-seeded from `data/` files.
+**store/** — Zustand stores: inventory, units, reports, app users. In-memory only — see State Management Rules. No user/role store; Clerk is read directly wherever role is needed.
 
-The current user's identity and role are **never** stored in Zustand. Clerk session data (`useUser()`, `useAuth()`) is the single source of truth for who is signed in and what role they have — read it directly wherever it's needed. There is no `userStore`.
-
-**lib/** — external service helpers. Examples:
+**lib/** — external service helpers and pure logic. Real examples from this project:
 ```
 lib/
-  supabase.ts
-  clerk.ts
-  api.ts
-  cn.ts
+  supabase.ts       # client setup — native Clerk third-party auth, see Supabase Rules
+  posthog.ts         # config only — the actual client lives in the root PostHogProvider
+  reports.ts          # date/timezone helpers, report-locking logic
+  reportExport.ts     # PDF/XLSX export — has test coverage, see Testing Rules
+  inventoryLabels.ts  # category/unit name lookups
+  getAssignedNames.ts # resolves assignedEmployeeIds to display names
 ```
-Never expose secret keys here.
+Never expose secret keys here. Clerk itself has no dedicated `lib/clerk.ts` wrapper — it's configured directly via `ClerkProvider` in the root layout and read via `useAuth()`/`useUser()` wherever needed.
 
-**data/** — hardcoded reference data such as default categories. Keep it typed.
+**data/** — hardcoded reference data. Currently one real file: `sampleUsers.ts` — a hand-maintained employee roster (name/email/role) bridged to real Clerk accounts by email match. **This file is fragile:** a single leading/trailing space in an email silently breaks that person's entire assignment capability with no visible error — they show up in pickers but never match. Any code that compares a `sampleUsers` email against a synced Clerk email must use `.trim().toLowerCase()` on both sides, not just `.toLowerCase()`. This file is scheduled for removal in favor of reading roles directly from Clerk (v2) — do not build new features that deepen reliance on it if avoidable.
 
 ---
 
@@ -127,13 +135,12 @@ Never expose secret keys here.
 
 There are three roles managed through Clerk, stored lowercase in `publicMetadata.role` (`"admin"`, `"manager"`, `"employee"`):
 
-- **Admin** — full access to all screens and functions: user management, **role assignment/changes**, item deletion, and settings. Role changes are Admin-only — no other role may modify anyone's role.
-- **Manager** — can add items, add categories, and change which category an item belongs to; can view all inventory and reports, and export reports. Settings scope: the Categories section (add only — no delete control, matching "cannot delete categories") and Sign Out. No Units section, no Report Retention info. Cannot delete items, delete categories, and cannot manage users or roles.
-- **Employee** — sees a scoped version of the Dashboard and a scoped version of Settings (Sign Out only — no Units, Categories, or Report Retention access), can add or remove quantity on inventory items, and can generate a report covering the last 24 hours. Employees do not have user management, role management, or item deletion.
+There are three roles managed through Clerk:
+- Admin — full access to all screens and all functions including user management, item deletion, and settings
+- Manager — can add items, view all inventory and reports, export reports, but cannot delete items or manage users
+- Employee — can only access the Reports screen for items they are personally assigned to, and can submit and edit their own reports until midnight
 
-This Employee scope is broader than "Reports only" — it was intentionally expanded from the original plan. Screens and prompts built before this update may still reflect the narrower placeholder version; bring them in line with this description as they're built out.
-
-Always check the user role (from Clerk, never a store) before rendering sensitive UI or allowing destructive actions.
+Always check the user role before rendering sensitive UI or allowing destructive actions.
 
 ---
 
@@ -171,7 +178,7 @@ When building from an attached design image:
 - Use consistent reusable styles
 - Make the UI responsive for different screen sizes
 
-Prefer reusable class patterns through utilities in `global.css`. If a utility does not exist and you see an opportunity, create it in `global.css` following the BEM method. Check `global.css` for an existing utility before writing new inline styles — several card, badge, and button utilities already exist and should be reused for consistency.
+Prefer reusable class patterns through utilities in `global.css`. If a utility does not exist and you see an opportunity, create it in `global.css` following the BEM method.
 
 Avoid large inline styles unless required.
 
@@ -199,7 +206,7 @@ Use `StyleSheet` or inline styles for these React Native components and scenario
 | **Button** | Only supports `title` and `onPress` props — cannot customize background, border, padding | `TouchableOpacity` with custom styles |
 | **KeyboardAvoidingView** | Behavior props not supported by className | Inline styles or StyleSheet |
 | **Modal** | `visible`, `transparent` props | Inline styles |
-| **ScrollView** | `contentContainerStyle`, `indicatorStyle`, and (for horizontal scrollers) the ScrollView's own height/`flexGrow` — leaving these unset can cause children to stretch unexpectedly | StyleSheet |
+| **ScrollView** | `contentContainerStyle`, `indicatorStyle` | StyleSheet |
 | **TextInput** | Input-specific props like `underlineColorAndroid` | Inline styles |
 | **Animated.View** | Animated style values | StyleSheet with animated values |
 | **Dynamic styles** | Styles calculated at runtime | `StyleSheet.create()` or inline |
@@ -208,7 +215,6 @@ Use `StyleSheet` or inline styles for these React Native components and scenario
 | **Shadow (iOS/Android)** | Different shadow syntax per platform | StyleSheet with platform checks |
 | **Transform arrays** | Complex transform combinations | StyleSheet |
 | **Z-index** | Sometimes needs explicit StyleSheet | StyleSheet |
-| **Tab bar (`Tabs.Screen` `screenOptions`)** | `tabBarStyle`, `tabBarIcon`, etc. are React Navigation style objects, not standard RN view props | StyleSheet or inline styles |
 
 ### When to Use StyleSheet
 
@@ -316,10 +322,10 @@ Do not import image assets directly inside screens or components.
 
 ## State Management Rules
 
-- Zustand for global client state that is genuinely app-wide and not owned by Clerk: inventory items/categories, report data, and local UI preferences like the selected category filter.
-- The current user and their role always come from Clerk (`useUser()`, `useAuth()`), never from Zustand. See Architecture → `store/` above.
-- Local state (`useState`) for temporary UI state such as modal visibility or form input.
-- AsyncStorage for persistence, via Zustand's `persist` middleware, only for state that should survive an app restart and isn't just re-seeded from a `data/` file (e.g. persist reports and filter preference; do not persist seeded inventory items/categories themselves).
+- Zustand for global client state (inventory items, units, reports, category/reporter filters).
+- Local state (`useState`) for temporary UI state — modal visibility, form input, filter selections.
+- **No persistence layer, ever.** Zustand stores are pure in-memory caches, refetched from Supabase each session. This is a deliberate change from the original plan — do not add AsyncStorage (or any other persistence) back in without discussing it first. Supabase is the single source of truth for data; Clerk is the single source of truth for identity and role.
+- **No `userStore`.** Role and identity are read directly from Clerk (`useUser()`, `publicMetadata.role`) wherever they're needed, not cached into a separate store.
 
 ---
 
@@ -337,23 +343,19 @@ Any destructive action (deleting an item or deleting a user) must trigger a two-
 - First popup: "Are you sure you want to delete this?" with Confirm and Cancel buttons
 - Second popup: "This action cannot be undone. Type DELETE to confirm." — deletion only proceeds if the user types the word DELETE exactly
 
-Never skip or shortcut this flow for any delete action. This applies to real, user-facing destructive actions on business data — it does not apply to development-only tooling (e.g. a `__DEV__`-gated test/debug control that never exists in a production build).
+Never skip or shortcut this flow for any delete action.
 
 ---
 
 ## Report Rules
 
-- One report per person per calendar day — any role can own a report (Employees report their assigned items; Admins and Managers can also file their own report, covering all items, via "+Make a report").
-- Quantity changes made while filling out a report are **drafts only** — they do not affect the shared inventory data until Report/Update Report is actually submitted. This is deliberate: an employee should be able to freely adjust steppers while working through a report without silently changing live inventory for everyone else until they've actually confirmed it.
-- Because of this, signing out while a report has unsubmitted draft changes must show a warning (in English, Arabic, and Urdu) explaining that inventory will not be updated and the changes will be lost, with the option to cancel and go back or sign out anyway.
-- Written content is optional at two levels: one overall note for the day, and a separate optional note per item.
-- Each item touched in a report keeps a timestamped history of quantity snapshots — one new entry each time Report/Update Report is submitted and that item has moved since its last recorded snapshot (not on every stepper tap, only on submission).
-- Reports are editable (quantities, notes, content) until midnight on the day they were submitted, then locked permanently.
-- On submitting or updating a report, show a confirmation with an OK button, in English, Arabic, and Urdu, thanking the person and reminding them they can still change it until the day is over.
-- Reports are automatically deleted after 4 months.
-- Admins and Managers see, per employee, whether today's report has been made yet ("Report still being made" vs "Report made"); tapping a made report shows the item-by-item quantity history and any written content (day-level and per-item).
-- Admins and Managers can export reports as PDF or XLSX.
-- Exports must include: date, reporter name, item name, category, and the full quantity snapshot history (with timestamps) and any note, per item touched. Every item touched in a report must be listed individually — a report covering multiple items must show all of them in the export, not a summarized count.
+- Employees submit daily reports for their assigned items only. Admins and Managers can also self-report via "+ Make a Report" — reports are not employee-exclusive, so don't assume `role === "employee"` when handling report data generally.
+- A report is a day-level written note plus zero or more **item entries**. Each item entry holds a **timestamped snapshot history** (every quantity change during that day, not just the latest) and a per-item note. A report that touched no items but has a written note is still a valid, real report — never treat "zero item entries" as "nothing happened."
+- Reports are editable until midnight on the day they are submitted (Riyadh time — see below), then locked permanently.
+- Snapshot history is append-only. Never overwrite or delete a prior snapshot.
+- Reports are automatically deleted after 4 months, admin-triggered only (see `useReportCleanup`). This requires explicit DELETE policies on `reports`, `report_item_entries`, and `report_item_snapshots` in Supabase RLS — a cascade delete still needs RLS permission on every child table it touches, not just the parent.
+- Admins and Managers can export reports as PDF or XLSX. Exports list **every item entry individually** — one row per item touched per report, including its full snapshot history and note — never summarized or collapsed to a single line per report.
+- **"Today" is always computed for Riyadh specifically (fixed UTC+3, no DST), never the device's own timezone.** See `getTodayIsoDate()` in `lib/reports.ts` and `current_riyadh_date()` in SQL. This was a deliberate fix — do not switch to `Intl.DateTimeFormat` with a timeZone option or any device-local date logic.
 
 ---
 
@@ -364,17 +366,17 @@ Use the Supabase JavaScript client initialized in `lib/supabase.ts`.
 Never expose the Supabase service key in client code. Only the anon key is safe for client-side use.
 Use Supabase Row Level Security policies to enforce role-based access at the database level.
 
-### Features that need a backend that doesn't exist yet
+**Auth integration:** this project uses Clerk's native third-party auth integration with Supabase (an `accessToken` function passed to the Supabase client) — **not** the JWT template method. The JWT template approach is deprecated; do not reintroduce it, even if older documentation or examples suggest it. RLS policies read the role via `current_user_role()`, which reads `auth.jwt()->'metadata'->>'role'`.
 
-Some features (creating or editing real Clerk user accounts, real database writes before Supabase is connected) genuinely require a backend the app doesn't have. Do not fake these with a local Zustand store standing in for the backend — a store that pretends to manage real users or write real data, when nothing it does actually reaches Clerk or a database, is misleading and will need to be torn out later. Instead: build the real screen and real display using whatever placeholder data already exists (e.g. `sampleUsers`), but gate the mutating action behind an honest "Coming soon" message (the `Alert.alert` pattern already used for report export) until the real backend integration lands.
+Every RLS change (new policy, new table, changed permission) is genuinely high-stakes — verify the exact behavior before assuming it, and prefer an explicit test over an assumption. A cascade delete needs RLS permission on every child table it touches, not just the parent; this has caused real bugs before.
 
 ---
 
 ## Clerk Rules
 
 Use Clerk for authentication and user management. Do not build custom auth.
-Store user role (admin, manager, employee — lowercase) in Clerk's `publicMetadata` field.
-Always read the role from Clerk session data before rendering role-gated UI. This is the single source of truth for identity and role — never duplicate it into a Zustand store.
+Store user role (Admin, Manager, Employee) in Clerk's `publicMetadata` field.
+Always read the role from Clerk session data before rendering role-gated UI.
 
 ---
 
@@ -399,6 +401,14 @@ When building a feature:
 
 ---
 
+## Testing Rules
+
+Jest + `jest-expo` were added after v1 shipped. Tests live in `src/<area>/__tests__/<name>.test.ts`, colocated with the code they cover — this is not pre-configured by `tsconfig.json`'s `exclude` (it has none), so don't assume test files are automatically excluded from typechecking; they're expected to pass strict TypeScript like everything else.
+
+Not every module has tests yet — coverage is added deliberately, module by module, not retrofitted everywhere at once. When writing tests: cover pure logic thoroughly, and for thin wrappers around native I/O (file system, sharing, print), mock the underlying library and verify it's called with correctly-shaped arguments rather than trying to verify real file writes. If you find an actual bug in the code while writing tests against it, stop and flag it — don't silently fix it inline as part of the testing task.
+
+---
+
 ## Linting and Validation
 
 Run these before finishing any feature:
@@ -406,6 +416,7 @@ Run these before finishing any feature:
 ```bash
 npm run lint
 npm run typecheck
+npm run test
 ```
 
 Fix all errors. No `any` in TypeScript.

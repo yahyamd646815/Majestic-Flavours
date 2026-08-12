@@ -9,26 +9,50 @@ export const sampleUsers: AppUser[] = [
   },
   {
     id: "user-2",
+    name: "Abdul Subhan Mohammed",
+    email: "flavorsmajestic@gmail.com",
+    role: "admin",
+  },
+  {
+    id: "user-3",
     name: "Yahya (Manager Account)",
     email: "yahyamd646815+manager@gmail.com",
     role: "manager",
   },
   {
-    id: "user-3",
+    id: "user-4",
+    name: "Ammar Abdul",
+    email: "ammarabdul99@gmail.com",
+    role: "manager",
+  },
+  {
+    id: "user-5",
     name: "Yahya (Employee Account)",
     email: "yahyamd646815+employee@gmail.com",
     role: "employee",
   },
   {
-    id: "user-4",
+    id: "user-6",
     name: "Yahya (Employee Account no1)",
     email: "yahyamd646815+employee1@gmail.com",
     role: "employee",
   },
   {
-    id: "user-5",
+    id: "user-7",
     name: "Yahya (Employee account no2)",
     email: "yahyamd646815+employee2@gmail.com",
+    role: "employee",
+  },
+  {
+    id: "user-8",
+    name: "Ismail Mohammed",
+    email: "mdmahadihossain705@gmail.com",
+    role: "employee",
+  },
+  {
+    id: "user-9",
+    name: "Wasit Khalil",
+    email: "wasitabbasi222@gmail.com",
     role: "employee",
   }
 ];
