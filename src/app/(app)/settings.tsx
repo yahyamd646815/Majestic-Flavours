@@ -183,7 +183,7 @@ export default function Settings() {
 
           {role === "manager" ? renderCategoriesSection(false) : null}
 
-          {role === "admin" || role === "manager" ? <CheckForUpdatesRow /> : null}
+          <CheckForUpdatesRow />
 
           <TouchableOpacity
             className="btn-primary"

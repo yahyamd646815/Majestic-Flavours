@@ -32,10 +32,15 @@ jest.mock("expo-sharing", () => ({
  * an in-memory stand-in that records what the export code asked it to do. The
  * spies are exported from the factory itself because a `jest.mock` factory runs
  * during import hoisting, before any top-level `const` in this file exists.
+ *
+ * `writeSpy`/`moveSpy` are typed explicitly rather than left as bare `jest.fn()`
+ * — an untyped mock erases its argument types to `any`, which would let a wrong
+ * call shape (wrong argument count, wrong types) pass silently instead of
+ * failing typecheck.
  */
 jest.mock("expo-file-system", () => {
-  const writeSpy = jest.fn();
-  const moveSpy = jest.fn();
+  const writeSpy = jest.fn<void, [string, string, { encoding?: string } | undefined]>();
+  const moveSpy = jest.fn<void, [string, string]>();
 
   class MockFile {
     uri: string;
@@ -77,8 +82,8 @@ const isAvailableAsync = Sharing.isAvailableAsync as jest.MockedFunction<
 const shareAsync = Sharing.shareAsync as jest.MockedFunction<typeof Sharing.shareAsync>;
 
 const fileSystemMock = FileSystem as unknown as {
-  __writeSpy: jest.Mock;
-  __moveSpy: jest.Mock;
+  __writeSpy: jest.Mock<void, [string, string, { encoding?: string } | undefined]>;
+  __moveSpy: jest.Mock<void, [string, string]>;
 };
 
 // --- Fixtures ---------------------------------------------------------------
@@ -268,11 +273,22 @@ describe("buildReportExportRows", () => {
 
 describe("buildReportExportHtml", () => {
   it("includes the document header, the export date and the filter summary", () => {
-    const html = buildReportExportHtml(buildInput([multiItemReport], "This Week · Amir Khan · Meat"));
+    // Frozen so `buildReportExportHtml`'s internal `getTodayIsoDate()` call and
+    // this test's own independent call are guaranteed to see the same "now" —
+    // without this, a test running across a real Riyadh-midnight boundary
+    // could assert a different date than the implementation produced.
+    jest.useFakeTimers().setSystemTime(new Date("2026-07-20T10:00:00.000Z"));
+    try {
+      const html = buildReportExportHtml(
+        buildInput([multiItemReport], "This Week · Amir Khan · Meat"),
+      );
 
-    expect(html).toContain("Majestic Flavours — Report Export");
-    expect(html).toContain(`Exported ${formatReportDate(getTodayIsoDate())}`);
-    expect(html).toContain("Filters: This Week · Amir Khan · Meat");
+      expect(html).toContain("Majestic Flavours — Report Export");
+      expect(html).toContain(`Exported ${formatReportDate(getTodayIsoDate())}`);
+      expect(html).toContain("Filters: This Week · Amir Khan · Meat");
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("renders one report section per report, not one per row", () => {
@@ -416,7 +432,7 @@ describe("exportReportsAsXlsx", () => {
     const [uri, contents, options] = fileSystemMock.__writeSpy.mock.calls[0];
     expect(uri).toBe("file:///cache/majestic-flavours-reports.xlsx");
     expect(typeof contents).toBe("string");
-    expect((contents as string).length).toBeGreaterThan(0);
+    expect(contents.length).toBeGreaterThan(0);
     expect(options).toEqual({ encoding: "base64" });
 
     expect(shareAsync).toHaveBeenCalledWith("file:///cache/majestic-flavours-reports.xlsx", {
