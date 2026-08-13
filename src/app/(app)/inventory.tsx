@@ -40,8 +40,12 @@ export default function Inventory() {
   const unitsLoading = useUnitsStore((state) => state.isLoading);
   const unitsError = useUnitsStore((state) => state.error);
   const fetchUnits = useUnitsStore((state) => state.fetchAll);
-  const selectedCategoryId = useInventoryStore((state) => state.selectedCategoryId);
-  const setSelectedCategoryId = useInventoryStore((state) => state.setSelectedCategoryId);
+  const selectedCategoryIds = useInventoryStore((state) => state.selectedCategoryIds);
+  const toggleCategoryId = useInventoryStore((state) => state.toggleCategoryId);
+  const clearCategoryIds = useInventoryStore((state) => state.clearCategoryIds);
+  const selectedEmployeeIds = useInventoryStore((state) => state.selectedEmployeeIds);
+  const toggleEmployeeId = useInventoryStore((state) => state.toggleEmployeeId);
+  const clearEmployeeIds = useInventoryStore((state) => state.clearEmployeeIds);
   const addItem = useInventoryStore((state) => state.addItem);
   const updateItem = useInventoryStore((state) => state.updateItem);
   const deleteItem = useInventoryStore((state) => state.deleteItem);
@@ -56,7 +60,6 @@ export default function Inventory() {
   // fields reset from scratch instead of carrying over the previous session.
   const [formSession, setFormSession] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
 
   const appUsers = useAppUsersStore((state) => state.users);
   const assignableEmployees = useMemo(
@@ -79,17 +82,23 @@ export default function Inventory() {
   const filteredItems = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return items.filter((item) => {
+      // Empty selection set means the filter dimension is inactive — matches
+      // everything, not nothing. Within a dimension, matching ANY selected
+      // value is enough (OR); category and employee dimensions must each
+      // individually pass (AND).
       const matchesCategory =
-        selectedCategoryId === null || item.categoryId === selectedCategoryId;
+        selectedCategoryIds.size === 0 || selectedCategoryIds.has(item.categoryId);
       const matchesQuery = query.length === 0 || item.name.toLowerCase().includes(query);
       const matchesEmployee =
-        selectedEmployeeId === null ||
-        (selectedEmployeeId === UNASSIGNED_EMPLOYEE_FILTER
-          ? item.assignedEmployeeIds.length === 0
-          : item.assignedEmployeeIds.includes(selectedEmployeeId));
+        selectedEmployeeIds.size === 0 ||
+        [...selectedEmployeeIds].some((employeeId) =>
+          employeeId === UNASSIGNED_EMPLOYEE_FILTER
+            ? item.assignedEmployeeIds.length === 0
+            : item.assignedEmployeeIds.includes(employeeId),
+        );
       return matchesCategory && matchesQuery && matchesEmployee;
     });
-  }, [items, selectedCategoryId, searchQuery, selectedEmployeeId]);
+  }, [items, selectedCategoryIds, searchQuery, selectedEmployeeIds]);
 
   // Admin and Manager both, matching what individual item editing already
   // allows — bulk assignment is not an Admin-only action.
@@ -318,14 +327,16 @@ export default function Inventory() {
 
             <CategoryFilter
               categories={categories}
-              selectedCategoryId={selectedCategoryId}
-              onSelect={setSelectedCategoryId}
+              selectedCategoryIds={selectedCategoryIds}
+              onToggle={toggleCategoryId}
+              onClear={clearCategoryIds}
             />
 
             <EmployeeFilter
               employees={assignableEmployees}
-              selectedEmployeeId={selectedEmployeeId}
-              onSelect={setSelectedEmployeeId}
+              selectedEmployeeIds={selectedEmployeeIds}
+              onToggle={toggleEmployeeId}
+              onClear={clearEmployeeIds}
             />
 
             <FlatList
@@ -338,7 +349,7 @@ export default function Inventory() {
                 <View className="items-center gap-2 py-16">
                   <Ionicons name="cube-outline" size={40} color={colors.textSecondary} />
                   <Text className="font-inter-medium text-sm text-text-secondary">
-                    No items in this category yet.
+                    No items match these filters — try a different combination.
                   </Text>
                 </View>
               }

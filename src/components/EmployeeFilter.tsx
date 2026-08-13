@@ -2,28 +2,35 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity } from "react-native";
 
 import type { AssignableEmployee } from "@/lib/assignableEmployees";
 
-/** Sentinel filter value for "items with no assigned employees" — shares the
- * same single-select value space as `null` ("All") and a Clerk user id. */
+/** Sentinel filter value for "items with no assigned employees" — just one
+ * more ordinary member of `selectedEmployeeIds`, composing through the same
+ * OR logic as a real Clerk user id (no special-casing needed). */
 export const UNASSIGNED_EMPLOYEE_FILTER = "unassigned";
 
 type EmployeeFilterProps = {
   employees: AssignableEmployee[];
-  /** `null` means "All". `UNASSIGNED_EMPLOYEE_FILTER` means items with no
-   * assigned employees. Otherwise a Clerk user id, matched against
-   * `item.assignedEmployeeIds`. */
-  selectedEmployeeId: string | null;
-  onSelect: (employeeId: string | null) => void;
+  /** Empty set means "All" — matches every item, not none. Otherwise one or
+   * more Clerk user ids (plus optionally `UNASSIGNED_EMPLOYEE_FILTER`), OR'd
+   * together against `item.assignedEmployeeIds`. */
+  selectedEmployeeIds: Set<string>;
+  onToggle: (employeeId: string) => void;
+  onClear: () => void;
 };
 
-/** Same single-select chip-row pattern as `CategoryFilter`: tapping a chip
- * replaces the current selection, tapping "All" clears it.
+/** Same multi-select chip-row pattern as `CategoryFilter`: tapping a chip
+ * toggles it in/out of the selection, tapping "All" clears the whole set.
  *
  * Only employees who have actually signed in (and so have a real Clerk id)
  * are listed — `assignedEmployeeIds` can never contain anyone else, so a chip
  * for them could never match an item. */
-export function EmployeeFilter({ employees, selectedEmployeeId, onSelect }: EmployeeFilterProps) {
-  const isAllActive = selectedEmployeeId === null;
-  const isUnassignedActive = selectedEmployeeId === UNASSIGNED_EMPLOYEE_FILTER;
+export function EmployeeFilter({
+  employees,
+  selectedEmployeeIds,
+  onToggle,
+  onClear,
+}: EmployeeFilterProps) {
+  const isAllActive = selectedEmployeeIds.size === 0;
+  const isUnassignedActive = selectedEmployeeIds.has(UNASSIGNED_EMPLOYEE_FILTER);
   const filterableEmployees = employees.filter(
     (employee): employee is AssignableEmployee & { clerkUserId: string } =>
       employee.clerkUserId !== undefined,
@@ -39,7 +46,7 @@ export function EmployeeFilter({ employees, selectedEmployeeId, onSelect }: Empl
       <TouchableOpacity
         className={isAllActive ? "chip chip--active" : "chip"}
         activeOpacity={0.8}
-        onPress={() => onSelect(null)}
+        onPress={onClear}
       >
         <Text className={isAllActive ? "chip__text chip__text--active" : "chip__text"}>All</Text>
       </TouchableOpacity>
@@ -47,7 +54,7 @@ export function EmployeeFilter({ employees, selectedEmployeeId, onSelect }: Empl
       <TouchableOpacity
         className={isUnassignedActive ? "chip chip--active" : "chip"}
         activeOpacity={0.8}
-        onPress={() => onSelect(UNASSIGNED_EMPLOYEE_FILTER)}
+        onPress={() => onToggle(UNASSIGNED_EMPLOYEE_FILTER)}
       >
         <Text className={isUnassignedActive ? "chip__text chip__text--active" : "chip__text"}>
           Unassigned
@@ -55,13 +62,13 @@ export function EmployeeFilter({ employees, selectedEmployeeId, onSelect }: Empl
       </TouchableOpacity>
 
       {filterableEmployees.map((employee) => {
-        const isActive = selectedEmployeeId === employee.clerkUserId;
+        const isActive = selectedEmployeeIds.has(employee.clerkUserId);
         return (
           <TouchableOpacity
             key={employee.id}
             className={isActive ? "chip chip--active" : "chip"}
             activeOpacity={0.8}
-            onPress={() => onSelect(employee.clerkUserId)}
+            onPress={() => onToggle(employee.clerkUserId)}
           >
             <Text className={isActive ? "chip__text chip__text--active" : "chip__text"}>
               {employee.name}

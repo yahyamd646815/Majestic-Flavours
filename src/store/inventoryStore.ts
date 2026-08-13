@@ -30,8 +30,17 @@ type InventoryState = {
   categories: Category[];
   isLoading: boolean;
   error: string | null;
-  selectedCategoryId: string | null;
-  setSelectedCategoryId: (categoryId: string | null) => void;
+  /** Empty set means the filter dimension is inactive — matches every item,
+   * not none. See `toggleCategoryId`/`toggleEmployeeId`. */
+  selectedCategoryIds: Set<string>;
+  toggleCategoryId: (categoryId: string) => void;
+  clearCategoryIds: () => void;
+  /** Same empty-set-means-inactive contract as `selectedCategoryIds`. May
+   * also contain `UNASSIGNED_EMPLOYEE_FILTER` (see `EmployeeFilter`) as an
+   * ordinary member — it composes through the same OR logic as a real id. */
+  selectedEmployeeIds: Set<string>;
+  toggleEmployeeId: (employeeId: string) => void;
+  clearEmployeeIds: () => void;
   getLowStockItems: () => InventoryItem[];
   fetchAll: (supabase: SupabaseClient) => Promise<void>;
   addItem: (
@@ -64,8 +73,24 @@ export const useInventoryStore = create<InventoryState>()((set, get) => ({
   categories: [],
   isLoading: true,
   error: null,
-  selectedCategoryId: null,
-  setSelectedCategoryId: (categoryId) => set({ selectedCategoryId: categoryId }),
+  selectedCategoryIds: new Set(),
+  toggleCategoryId: (categoryId) =>
+    set((state) => {
+      const next = new Set(state.selectedCategoryIds);
+      if (next.has(categoryId)) next.delete(categoryId);
+      else next.add(categoryId);
+      return { selectedCategoryIds: next };
+    }),
+  clearCategoryIds: () => set({ selectedCategoryIds: new Set() }),
+  selectedEmployeeIds: new Set(),
+  toggleEmployeeId: (employeeId) =>
+    set((state) => {
+      const next = new Set(state.selectedEmployeeIds);
+      if (next.has(employeeId)) next.delete(employeeId);
+      else next.add(employeeId);
+      return { selectedEmployeeIds: next };
+    }),
+  clearEmployeeIds: () => set({ selectedEmployeeIds: new Set() }),
   getLowStockItems: () =>
     get().items.filter((item) => item.currentQuantity <= item.minThreshold),
 

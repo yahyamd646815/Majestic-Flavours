@@ -41,7 +41,7 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
 
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [dayContent, setDayContent] = useState(todaysReport?.content ?? "");
 
@@ -63,11 +63,20 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
     const query = searchQuery.trim().toLowerCase();
     return items.filter((item) => {
       const matchesCategory =
-        selectedCategoryId === null || item.categoryId === selectedCategoryId;
+        selectedCategoryIds.size === 0 || selectedCategoryIds.has(item.categoryId);
       const matchesQuery = query.length === 0 || item.name.toLowerCase().includes(query);
       return matchesCategory && matchesQuery;
     });
-  }, [items, selectedCategoryId, searchQuery]);
+  }, [items, selectedCategoryIds, searchQuery]);
+
+  function toggleCategoryId(categoryId: string) {
+    setSelectedCategoryIds((current) => {
+      const next = new Set(current);
+      if (next.has(categoryId)) next.delete(categoryId);
+      else next.add(categoryId);
+      return next;
+    });
+  }
 
   const entriesByItemId = useMemo(
     () => new Map((todaysReport?.itemEntries ?? []).map((entry) => [entry.itemId, entry])),
@@ -176,8 +185,9 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
 
       <CategoryFilter
         categories={visibleCategories}
-        selectedCategoryId={selectedCategoryId}
-        onSelect={setSelectedCategoryId}
+        selectedCategoryIds={selectedCategoryIds}
+        onToggle={toggleCategoryId}
+        onClear={() => setSelectedCategoryIds(new Set())}
       />
 
       <FlatList
