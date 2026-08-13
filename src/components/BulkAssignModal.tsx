@@ -7,25 +7,31 @@ import { sampleUsers } from "@/data/sampleUsers";
 import { getAssignableEmployees } from "@/lib/assignableEmployees";
 import { useAppUsersStore } from "@/store/appUsersStore";
 
+type BulkAssignMode = "assign" | "unassign";
+
 type BulkAssignModalProps = {
   visible: boolean;
-  /** How many inventory items the chosen employee will be added to. */
+  /** How many inventory items the chosen employee will be added to or removed from. */
   itemCount: number;
   isAssigning: boolean;
   onClose: () => void;
   onAssign: (clerkUserId: string) => void;
+  onUnassign: (clerkUserId: string) => void;
 };
 
 /**
- * Picks ONE employee to add to every selected inventory item.
+ * Picks ONE employee to add to or remove from every selected inventory item,
+ * depending on the Assign/Unassign mode toggle.
  *
  * Deliberately not `ItemFormModal`'s picker: that one toggles several employees
  * for a single item, this one picks a single employee for many items. The
  * underlying roster-to-Clerk bridging is shared through
  * `getAssignableEmployees` so both stay consistent.
  *
- * Assignment is additive only — an employee already on an item is never removed
- * and never duplicated (see `handleBulkAssign` on the Inventory screen).
+ * Both modes are additive/subtractive only — an item already in the target
+ * state (already assigned, or already missing the employee) is left as-is,
+ * never duplicated and never erroring (see `handleBulkAssign` /
+ * `handleBulkUnassign` on the Inventory screen).
  */
 export function BulkAssignModal({
   visible,
@@ -33,6 +39,7 @@ export function BulkAssignModal({
   isAssigning,
   onClose,
   onAssign,
+  onUnassign,
 }: BulkAssignModalProps) {
   const appUsers = useAppUsersStore((state) => state.users);
   const appUsersLoading = useAppUsersStore((state) => state.isLoading);
@@ -42,9 +49,13 @@ export function BulkAssignModal({
     [appUsers],
   );
 
+  // Defaults to "assign" every time the modal opens (it remounts via the
+  // `key` the Inventory screen bumps on each open), so existing behavior is
+  // unchanged unless someone actively switches modes.
+  const [mode, setMode] = useState<BulkAssignMode>("assign");
   const [selectedClerkUserId, setSelectedClerkUserId] = useState<string | null>(null);
 
-  const canAssign =
+  const canSubmit =
     selectedClerkUserId !== null && itemCount > 0 && !appUsersLoading && !isAssigning;
 
   return (
@@ -52,10 +63,57 @@ export function BulkAssignModal({
       <View style={styles.overlay}>
         <View style={styles.sheet}>
           <ScrollView contentContainerStyle={styles.scrollContent}>
-            <Text className="font-inter-bold text-xl text-maroon">Assign Employee</Text>
-            <Text className="mt-1 font-inter text-sm text-text-secondary">
-              Adds one employee to {itemCount} selected item{itemCount === 1 ? "" : "s"}. Existing
-              assignments are kept.
+            <Text className="font-inter-bold text-xl text-maroon">
+              {mode === "assign" ? "Assign Employee" : "Unassign Employee"}
+            </Text>
+
+            <View className="mt-3 flex-row rounded-lg border border-border p-1">
+              <TouchableOpacity
+                className={
+                  mode === "assign" ? "flex-1 items-center rounded-md bg-gold py-2" : "flex-1 items-center py-2"
+                }
+                activeOpacity={0.8}
+                onPress={() => setMode("assign")}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: mode === "assign" }}
+                accessibilityLabel="Assign mode"
+              >
+                <Text
+                  className={
+                    mode === "assign"
+                      ? "font-inter-semibold text-sm text-text-primary"
+                      : "font-inter-medium text-sm text-text-secondary"
+                  }
+                >
+                  Assign
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                className={
+                  mode === "unassign" ? "flex-1 items-center rounded-md bg-gold py-2" : "flex-1 items-center py-2"
+                }
+                activeOpacity={0.8}
+                onPress={() => setMode("unassign")}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: mode === "unassign" }}
+                accessibilityLabel="Unassign mode"
+              >
+                <Text
+                  className={
+                    mode === "unassign"
+                      ? "font-inter-semibold text-sm text-text-primary"
+                      : "font-inter-medium text-sm text-text-secondary"
+                  }
+                >
+                  Unassign
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text className="mt-3 font-inter text-sm text-text-secondary">
+              {mode === "assign"
+                ? `Adds one employee to ${itemCount} selected item${itemCount === 1 ? "" : "s"}. Existing assignments are kept.`
+                : `Removes one employee from ${itemCount} selected item${itemCount === 1 ? "" : "s"}. Items without that employee are left untouched.`}
             </Text>
 
             <View className="mt-4 gap-2">
@@ -115,14 +173,24 @@ export function BulkAssignModal({
               </TouchableOpacity>
               <TouchableOpacity
                 className="btn-primary flex-1"
-                activeOpacity={canAssign ? 0.85 : 1}
-                disabled={!canAssign}
-                style={canAssign ? undefined : styles.disabled}
+                activeOpacity={canSubmit ? 0.85 : 1}
+                disabled={!canSubmit}
+                style={canSubmit ? undefined : styles.disabled}
                 onPress={() => {
-                  if (selectedClerkUserId !== null) onAssign(selectedClerkUserId);
+                  if (selectedClerkUserId === null) return;
+                  if (mode === "assign") onAssign(selectedClerkUserId);
+                  else onUnassign(selectedClerkUserId);
                 }}
               >
-                <Text className="btn-primary__text">{isAssigning ? "Assigning..." : "Assign"}</Text>
+                <Text className="btn-primary__text">
+                  {isAssigning
+                    ? mode === "assign"
+                      ? "Assigning..."
+                      : "Unassigning..."
+                    : mode === "assign"
+                      ? "Assign"
+                      : "Unassign"}
+                </Text>
               </TouchableOpacity>
             </View>
           </ScrollView>

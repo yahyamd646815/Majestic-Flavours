@@ -138,6 +138,34 @@ export default function Inventory() {
     }
   }
 
+  async function handleBulkUnassign(employeeId: string) {
+    if (isAssigning) return;
+    setIsAssigning(true);
+    try {
+      const targets = items.filter((item) => selectedItemIds.has(item.id));
+
+      // remove_employee_from_item is idempotent (array_remove is a no-op when
+      // the id isn't present), so items that never had this employee assigned
+      // are left untouched rather than causing a failure.
+      const results = await Promise.all(
+        targets.map((item) => removeEmployeeFromItem(supabase, item.id, employeeId)),
+      );
+
+      const failedCount = results.filter((succeeded) => !succeeded).length;
+      if (failedCount > 0) {
+        Alert.alert(
+          "Some items could not be updated",
+          `${failedCount} of ${targets.length} items failed. Check your connection and try again.`,
+        );
+        return;
+      }
+
+      exitSelectionMode();
+    } finally {
+      setIsAssigning(false);
+    }
+  }
+
   function closeForm() {
     setIsAddOpen(false);
     setEditItem(null);
@@ -383,6 +411,7 @@ export default function Inventory() {
         isAssigning={isAssigning}
         onClose={() => setIsAssignOpen(false)}
         onAssign={(clerkUserId) => void handleBulkAssign(clerkUserId)}
+        onUnassign={(clerkUserId) => void handleBulkUnassign(clerkUserId)}
       />
 
       <DeleteConfirmModal
