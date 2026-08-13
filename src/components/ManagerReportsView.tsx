@@ -17,7 +17,7 @@ import {
   getTodayIsoDate,
   isReportLocked,
   matchesDateFilter,
-  reportMatchesCategory,
+  reportMatchesAnyCategory,
 } from "@/lib/reports";
 import { useAppUsersStore } from "@/store/appUsersStore";
 import { useInventoryStore } from "@/store/inventoryStore";
@@ -44,10 +44,28 @@ export function ManagerReportsView({ footer, onSelfReport }: ManagerReportsViewP
   );
 
   const [dateFilter, setDateFilter] = useState<ReportDateFilter>("all");
-  const [reporterId, setReporterId] = useState<string | null>(null);
-  const [categoryId, setCategoryId] = useState<string | null>(null);
+  const [reporterIds, setReporterIds] = useState<Set<string>>(new Set());
+  const [categoryIds, setCategoryIds] = useState<Set<string>>(new Set());
   const [detailReportId, setDetailReportId] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+
+  function toggleReporterId(reporterId: string) {
+    setReporterIds((current) => {
+      const next = new Set(current);
+      if (next.has(reporterId)) next.delete(reporterId);
+      else next.add(reporterId);
+      return next;
+    });
+  }
+
+  function toggleCategoryId(categoryId: string) {
+    setCategoryIds((current) => {
+      const next = new Set(current);
+      if (next.has(categoryId)) next.delete(categoryId);
+      else next.add(categoryId);
+      return next;
+    });
+  }
 
   const todayIsoDate = getTodayIsoDate();
 
@@ -76,7 +94,7 @@ export function ManagerReportsView({ footer, onSelfReport }: ManagerReportsViewP
   const todayRows = useMemo(
     () =>
       todayReporterCandidates
-        .filter((reporter) => reporterId === null || reporter.id === reporterId)
+        .filter((reporter) => reporterIds.size === 0 || reporterIds.has(reporter.id))
         .map((reporter) => ({
           reporter,
           report: reporter.clerkUserId
@@ -84,53 +102,67 @@ export function ManagerReportsView({ footer, onSelfReport }: ManagerReportsViewP
             : undefined,
         }))
         .filter(({ reporter, report }) => {
-          if (categoryId === null) return true;
-          if (report) return reportMatchesCategory(report, items, categoryId);
+          if (categoryIds.size === 0) return true;
+          if (report) return reportMatchesAnyCategory(report, items, categoryIds);
           return items.some(
             (item) =>
-              item.categoryId === categoryId && item.assignedEmployeeIds.includes(reporter.id),
+              categoryIds.has(item.categoryId) && item.assignedEmployeeIds.includes(reporter.id),
           );
         }),
     [
       todayReporterCandidates,
       getReportForReporterAndDate,
-      reporterId,
-      categoryId,
+      reporterIds,
+      categoryIds,
       items,
       todayIsoDate,
     ],
   );
 
-  const selectedReporterClerkId =
-    reporterId === null
-      ? null
-      : (reporters.find((reporter) => reporter.id === reporterId)?.clerkUserId ?? null);
+  // Reporters without a synced Clerk id can never own a report (reports are
+  // keyed on real Clerk ids), so they're dropped here rather than producing
+  // a phantom match.
+  const selectedReporterClerkIds = useMemo(
+    () =>
+      new Set(
+        reporters
+          .filter((reporter) => reporterIds.has(reporter.id) && reporter.clerkUserId !== undefined)
+          .map((reporter) => reporter.clerkUserId as string),
+      ),
+    [reporters, reporterIds],
+  );
 
   const historicalReports = useMemo(
     () =>
       reports
         .filter((report) => {
           if (!matchesDateFilter(report.date, dateFilter, todayIsoDate)) return false;
-          if (reporterId !== null && report.reporterId !== selectedReporterClerkId)
+          if (reporterIds.size > 0 && !selectedReporterClerkIds.has(report.reporterId))
             return false;
-          if (categoryId !== null && !reportMatchesCategory(report, items, categoryId))
+          if (categoryIds.size > 0 && !reportMatchesAnyCategory(report, items, categoryIds))
             return false;
           return true;
         })
         .sort((a, b) => b.date.localeCompare(a.date)),
-    [reports, items, dateFilter, reporterId, selectedReporterClerkId, categoryId, todayIsoDate],
+    [reports, items, dateFilter, reporterIds, selectedReporterClerkIds, categoryIds, todayIsoDate],
   );
 
   const detailReport = reports.find((report) => report.id === detailReportId);
 
   const filterSummary = [
     REPORT_DATE_FILTER_LABELS[dateFilter],
-    reporterId === null
+    reporterIds.size === 0
       ? "All reporters"
-      : (reporters.find((reporter) => reporter.id === reporterId)?.name ?? "Unknown reporter"),
-    categoryId === null
+      : reporters
+          .filter((reporter) => reporterIds.has(reporter.id))
+          .map((reporter) => reporter.name)
+          .join(", "),
+    categoryIds.size === 0
       ? "All categories"
-      : (categories.find((category) => category.id === categoryId)?.name ?? "Unknown category"),
+      : categories
+          .filter((category) => categoryIds.has(category.id))
+          .map((category) => category.name)
+          .join(", "),
   ].join(" · ");
 
   // `historicalReports` already applies all three filters for every date
@@ -197,11 +229,13 @@ export function ManagerReportsView({ footer, onSelfReport }: ManagerReportsViewP
         dateFilter={dateFilter}
         onDateFilterChange={setDateFilter}
         reporters={reporters}
-        selectedReporterId={reporterId}
-        onReporterChange={setReporterId}
+        selectedReporterIds={reporterIds}
+        onReporterToggle={toggleReporterId}
+        onReporterClear={() => setReporterIds(new Set())}
         categories={categories}
-        selectedCategoryId={categoryId}
-        onCategoryChange={setCategoryId}
+        selectedCategoryIds={categoryIds}
+        onCategoryToggle={toggleCategoryId}
+        onCategoryClear={() => setCategoryIds(new Set())}
       />
 
       {dateFilter === "today" ? (
@@ -211,7 +245,9 @@ export function ManagerReportsView({ footer, onSelfReport }: ManagerReportsViewP
           keyExtractor={(row) => row.reporter.id}
           contentContainerStyle={styles.listContent}
           ItemSeparatorComponent={() => <View className="h-3" />}
-          ListEmptyComponent={<EmptyState message="No reporters match these filters." />}
+          ListEmptyComponent={
+            <EmptyState message="No reporters match these filters — try a different combination." />
+          }
           ListFooterComponent={footer}
           renderItem={({ item: row }) => (
             <ReporterTodayRow
@@ -230,7 +266,9 @@ export function ManagerReportsView({ footer, onSelfReport }: ManagerReportsViewP
           keyExtractor={(report) => report.id}
           contentContainerStyle={styles.listContent}
           ItemSeparatorComponent={() => <View className="h-3" />}
-          ListEmptyComponent={<EmptyState message="No reports match these filters yet." />}
+          ListEmptyComponent={
+            <EmptyState message="No reports match these filters — try a different combination." />
+          }
           ListFooterComponent={footer}
           renderItem={({ item: report }) => (
             <ReportCard
