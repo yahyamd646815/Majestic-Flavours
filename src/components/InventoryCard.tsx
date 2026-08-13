@@ -15,6 +15,14 @@ type InventoryCardProps = {
   canDelete: boolean;
   onEdit: () => void;
   onDelete: () => void;
+  /**
+   * Bulk-selection mode. While true the whole card is a selection target and
+   * the Edit / Delete actions are not rendered at all — a stray tap must never
+   * be able to open the item form or the delete flow.
+   */
+  selectionMode?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: () => void;
 };
 
 export function InventoryCard({
@@ -24,6 +32,9 @@ export function InventoryCard({
   canDelete,
   onEdit,
   onDelete,
+  selectionMode = false,
+  isSelected = false,
+  onToggleSelect,
 }: InventoryCardProps) {
   const appUsers = useAppUsersStore((state) => state.users);
 
@@ -46,9 +57,17 @@ export function InventoryCard({
   const categoryName = getCategoryName(categories, item.categoryId);
   const unitLabel = getUnitLabel(units, item.unitId);
 
-  return (
-    <View className="card gap-3">
+  const body = (
+    <>
       <View className="flex-row items-start justify-between gap-2">
+        {selectionMode ? (
+          <Ionicons
+            name={isSelected ? "checkbox" : "square-outline"}
+            size={22}
+            color={isSelected ? colors.gold : colors.textSecondary}
+          />
+        ) : null}
+
         <View className="flex-1">
           <Text className="font-inter-semibold text-base text-text-primary">{item.name}</Text>
           <Text className="font-inter text-xs text-text-secondary">{categoryName}</Text>
@@ -74,27 +93,50 @@ export function InventoryCard({
         <Text className="font-inter text-xs text-text-secondary">Unassigned</Text>
       )}
 
-      <View className="flex-row gap-3 border-t border-border pt-3">
-        <TouchableOpacity
-          className="flex-1 flex-row items-center justify-center gap-1 rounded-lg border border-border py-2"
-          activeOpacity={0.8}
-          onPress={onEdit}
-        >
-          <Ionicons name="create-outline" size={16} color={colors.maroon} />
-          <Text className="font-inter-semibold text-sm text-maroon">Edit</Text>
-        </TouchableOpacity>
-
-        {canDelete ? (
+      {selectionMode ? null : (
+        <View className="flex-row gap-3 border-t border-border pt-3">
           <TouchableOpacity
-            className="flex-1 flex-row items-center justify-center gap-1 rounded-lg border border-out-of-stock py-2"
+            className="flex-1 flex-row items-center justify-center gap-1 rounded-lg border border-border py-2"
             activeOpacity={0.8}
-            onPress={onDelete}
+            onPress={onEdit}
           >
-            <Ionicons name="trash-outline" size={16} color={colors.outOfStock} />
-            <Text className="font-inter-semibold text-sm text-out-of-stock">Delete</Text>
+            <Ionicons name="create-outline" size={16} color={colors.maroon} />
+            <Text className="font-inter-semibold text-sm text-maroon">Edit</Text>
           </TouchableOpacity>
-        ) : null}
-      </View>
-    </View>
+
+          {canDelete ? (
+            <TouchableOpacity
+              className="flex-1 flex-row items-center justify-center gap-1 rounded-lg border border-out-of-stock py-2"
+              activeOpacity={0.8}
+              onPress={onDelete}
+            >
+              <Ionicons name="trash-outline" size={16} color={colors.outOfStock} />
+              <Text className="font-inter-semibold text-sm text-out-of-stock">Delete</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      )}
+    </>
   );
+
+  if (selectionMode) {
+    // Both selected and unselected keep a 2px border so toggling never shifts
+    // the card's layout — only its colour changes.
+    return (
+      <TouchableOpacity
+        className={
+          isSelected ? "card gap-3 border-2 border-gold" : "card gap-3 border-2 border-transparent"
+        }
+        activeOpacity={0.85}
+        onPress={onToggleSelect}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: isSelected }}
+        accessibilityLabel={item.name}
+      >
+        {body}
+      </TouchableOpacity>
+    );
+  }
+
+  return <View className="card gap-3">{body}</View>;
 }

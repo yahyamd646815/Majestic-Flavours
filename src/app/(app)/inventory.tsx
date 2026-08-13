@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { BulkAssignModal } from "@/components/BulkAssignModal";
 import { CategoryFilter } from "@/components/CategoryFilter";
 import { DeleteConfirmModal } from "@/components/DeleteConfirmModal";
 import { ErrorState } from "@/components/ErrorState";
@@ -50,6 +51,18 @@ export default function Inventory() {
   const [formSession, setFormSession] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
 
+  // Bulk assignment. `selectedItemIds` deliberately survives search/category
+  // filter changes — that is what lets one action cover items from several
+  // categories: filter, select, re-filter, select more, assign once. It is
+  // cleared only when selection mode is left or an assignment completes.
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
+  const [isAssignOpen, setIsAssignOpen] = useState(false);
+  const [isAssigning, setIsAssigning] = useState(false);
+  // Bumped on every open so BulkAssignModal remounts and forgets the employee
+  // picked last time, mirroring how `formSession` resets ItemFormModal.
+  const [assignSession, setAssignSession] = useState(0);
+
   const filteredItems = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return items.filter((item) => {
@@ -60,7 +73,74 @@ export default function Inventory() {
     });
   }, [items, selectedCategoryId, searchQuery]);
 
+  // Admin and Manager both, matching what individual item editing already
+  // allows — bulk assignment is not an Admin-only action.
   if (role !== "admin" && role !== "manager") return <Redirect href="/reports" />;
+
+  const selectedCount = selectedItemIds.size;
+  const allVisibleSelected =
+    filteredItems.length > 0 && filteredItems.every((item) => selectedItemIds.has(item.id));
+
+  function exitSelectionMode() {
+    setIsSelectionMode(false);
+    setSelectedItemIds(new Set());
+    setIsAssignOpen(false);
+  }
+
+  function toggleItemSelected(itemId: string) {
+    setSelectedItemIds((current) => {
+      const next = new Set(current);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  }
+
+  /** Operates on `filteredItems` only — selections outside the current filter
+   * are left exactly as they are. */
+  function toggleSelectAllVisible() {
+    setSelectedItemIds((current) => {
+      const next = new Set(current);
+      for (const item of filteredItems) {
+        if (allVisibleSelected) next.delete(item.id);
+        else next.add(item.id);
+      }
+      return next;
+    });
+  }
+
+  async function handleBulkAssign(employeeId: string) {
+    if (isAssigning) return;
+    setIsAssigning(true);
+    try {
+      const targets = items.filter((item) => selectedItemIds.has(item.id));
+
+      const results = await Promise.all(
+        targets.map((item) => {
+          // Additive only: an item that already has this employee is left
+          // untouched rather than re-written, so there is no duplicate id and
+          // no spurious failure. Existing assignments are never removed.
+          if (item.assignedEmployeeIds.includes(employeeId)) return true;
+          return updateItem(supabase, item.id, {
+            assignedEmployeeIds: [...item.assignedEmployeeIds, employeeId],
+          });
+        }),
+      );
+
+      const failedCount = results.filter((succeeded) => !succeeded).length;
+      if (failedCount > 0) {
+        Alert.alert(
+          "Some items could not be updated",
+          `${failedCount} of ${targets.length} items failed. Check your connection and try again.`,
+        );
+        return;
+      }
+
+      exitSelectionMode();
+    } finally {
+      setIsAssigning(false);
+    }
+  }
 
   function closeForm() {
     setIsAddOpen(false);
@@ -121,7 +201,38 @@ export default function Inventory() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.white }}>
       <View className="flex-1 gap-4 pt-4">
-        <Text className="px-4 font-inter-bold text-2xl text-maroon">Inventory</Text>
+        <View className="flex-row items-center justify-between gap-3 px-4">
+          <Text className="font-inter-bold text-2xl text-maroon">Inventory</Text>
+
+          {isReady ? (
+            <TouchableOpacity
+              className={
+                isSelectionMode
+                  ? "flex-row items-center gap-1 rounded-lg bg-gold px-3 py-2"
+                  : "flex-row items-center gap-1 rounded-lg border border-border px-3 py-2"
+              }
+              activeOpacity={0.85}
+              onPress={() => (isSelectionMode ? exitSelectionMode() : setIsSelectionMode(true))}
+              accessibilityRole="button"
+              accessibilityLabel={isSelectionMode ? "Exit selection mode" : "Select items"}
+            >
+              <Ionicons
+                name={isSelectionMode ? "close" : "checkbox-outline"}
+                size={16}
+                color={isSelectionMode ? colors.textPrimary : colors.maroon}
+              />
+              <Text
+                className={
+                  isSelectionMode
+                    ? "font-inter-semibold text-xs text-text-primary"
+                    : "font-inter-semibold text-xs text-maroon"
+                }
+              >
+                {isSelectionMode ? "Done" : "Select"}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
 
         {combinedError !== null ? (
           <ErrorState
@@ -171,6 +282,9 @@ export default function Inventory() {
                   canDelete={role === "admin"}
                   onEdit={() => openEditForm(item)}
                   onDelete={() => setDeleteTarget(item)}
+                  selectionMode={isSelectionMode}
+                  isSelected={selectedItemIds.has(item.id)}
+                  onToggleSelect={() => toggleItemSelected(item.id)}
                 />
               )}
             />
@@ -178,7 +292,52 @@ export default function Inventory() {
         )}
       </View>
 
-      {isReady ? (
+      {isReady && isSelectionMode ? (
+        <View className="gap-3 border-t border-border bg-white px-4 py-3">
+          <View className="flex-row items-center justify-between gap-3">
+            <Text className="font-inter-medium text-sm text-text-primary">
+              {selectedCount} item{selectedCount === 1 ? "" : "s"} selected
+            </Text>
+
+            <TouchableOpacity
+              className="chip"
+              activeOpacity={0.8}
+              disabled={filteredItems.length === 0}
+              style={filteredItems.length === 0 ? styles.disabled : undefined}
+              onPress={toggleSelectAllVisible}
+            >
+              <Text className="chip__text">
+                {allVisibleSelected ? "Deselect All Visible" : "Select All Visible"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View className="flex-row gap-3">
+            <TouchableOpacity
+              className="flex-1 items-center rounded-lg border border-border py-3"
+              activeOpacity={0.8}
+              onPress={exitSelectionMode}
+            >
+              <Text className="font-inter-semibold text-base text-text-primary">Cancel</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              className="btn-primary flex-1"
+              activeOpacity={selectedCount === 0 ? 1 : 0.85}
+              disabled={selectedCount === 0}
+              style={selectedCount === 0 ? styles.disabled : undefined}
+              onPress={() => {
+                setAssignSession((session) => session + 1);
+                setIsAssignOpen(true);
+              }}
+            >
+              <Text className="btn-primary__text">Assign to...</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
+
+      {isReady && !isSelectionMode ? (
         <TouchableOpacity
           className="fab"
           style={styles.fabShadow}
@@ -197,6 +356,15 @@ export default function Inventory() {
         item={editItem ?? undefined}
         onClose={closeForm}
         onSubmit={(values) => void handleSubmit(values)}
+      />
+
+      <BulkAssignModal
+        key={assignSession}
+        visible={isAssignOpen}
+        itemCount={selectedCount}
+        isAssigning={isAssigning}
+        onClose={() => setIsAssignOpen(false)}
+        onAssign={(clerkUserId) => void handleBulkAssign(clerkUserId)}
       />
 
       <DeleteConfirmModal
@@ -222,5 +390,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 6,
     elevation: 6,
+  },
+  disabled: {
+    opacity: 0.5,
   },
 });

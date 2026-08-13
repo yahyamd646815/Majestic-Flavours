@@ -7,6 +7,7 @@ import { ReportDetailModal } from "@/components/ReportDetailModal";
 import { ReportFilters } from "@/components/ReportFilters";
 import { colors } from "@/constants/theme";
 import { sampleUsers } from "@/data/sampleUsers";
+import { bridgeRosterByEmail } from "@/lib/assignableEmployees";
 import { getUnitLabel } from "@/lib/inventoryLabels";
 import type { ReportExportInput } from "@/lib/reportExport";
 import { exportReportsAsPdf, exportReportsAsXlsx } from "@/lib/reportExport";
@@ -51,21 +52,13 @@ export function ManagerReportsView({ footer, onSelfReport }: ManagerReportsViewP
   const todayIsoDate = getTodayIsoDate();
 
   // Roles still live only in `sampleUsers` on the client, but reports are
-  // keyed on real Clerk ids now — bridged by email, case-insensitively
-  // (Clerk often normalizes case on sign-up regardless of how the address
-  // was hand-typed into sampleUsers.ts). Someone who has never signed in
-  // simply has no Clerk id, and therefore no report.
+  // keyed on real Clerk ids now — bridged by email via the shared helper
+  // (also used by ItemFormModal/BulkAssignModal's employee pickers), which
+  // compares `.trim().toLowerCase()` on both sides. Someone who has never
+  // signed in simply has no Clerk id, and therefore no report. Every role is
+  // kept here (not just employees) since Admins and Managers can self-report.
   const reporters = useMemo<ReporterCandidate[]>(
-    () =>
-      sampleUsers.map((sampleUser) => {
-        const targetEmail = sampleUser.email.toLowerCase();
-        const synced = appUsers.find((appUser) => appUser.email.toLowerCase() === targetEmail);
-        return {
-          ...sampleUser,
-          name: synced?.name ?? sampleUser.name,
-          clerkUserId: synced?.clerkUserId,
-        };
-      }),
+    () => bridgeRosterByEmail(sampleUsers, appUsers),
     [appUsers],
   );
 
