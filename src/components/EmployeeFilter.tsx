@@ -2,9 +2,14 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity } from "react-native";
 
 import type { AssignableEmployee } from "@/lib/assignableEmployees";
 
+/** Sentinel filter value for "items with no assigned employees" — shares the
+ * same single-select value space as `null` ("All") and a Clerk user id. */
+export const UNASSIGNED_EMPLOYEE_FILTER = "unassigned";
+
 type EmployeeFilterProps = {
   employees: AssignableEmployee[];
-  /** `null` means "All". Otherwise a Clerk user id, matched against
+  /** `null` means "All". `UNASSIGNED_EMPLOYEE_FILTER` means items with no
+   * assigned employees. Otherwise a Clerk user id, matched against
    * `item.assignedEmployeeIds`. */
   selectedEmployeeId: string | null;
   onSelect: (employeeId: string | null) => void;
@@ -18,6 +23,7 @@ type EmployeeFilterProps = {
  * for them could never match an item. */
 export function EmployeeFilter({ employees, selectedEmployeeId, onSelect }: EmployeeFilterProps) {
   const isAllActive = selectedEmployeeId === null;
+  const isUnassignedActive = selectedEmployeeId === UNASSIGNED_EMPLOYEE_FILTER;
   const filterableEmployees = employees.filter(
     (employee): employee is AssignableEmployee & { clerkUserId: string } =>
       employee.clerkUserId !== undefined,
@@ -36,6 +42,16 @@ export function EmployeeFilter({ employees, selectedEmployeeId, onSelect }: Empl
         onPress={() => onSelect(null)}
       >
         <Text className={isAllActive ? "chip__text chip__text--active" : "chip__text"}>All</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        className={isUnassignedActive ? "chip chip--active" : "chip"}
+        activeOpacity={0.8}
+        onPress={() => onSelect(UNASSIGNED_EMPLOYEE_FILTER)}
+      >
+        <Text className={isUnassignedActive ? "chip__text chip__text--active" : "chip__text"}>
+          Unassigned
+        </Text>
       </TouchableOpacity>
 
       {filterableEmployees.map((employee) => {

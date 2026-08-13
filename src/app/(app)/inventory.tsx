@@ -9,7 +9,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { BulkAssignModal } from "@/components/BulkAssignModal";
 import { CategoryFilter } from "@/components/CategoryFilter";
 import { DeleteConfirmModal } from "@/components/DeleteConfirmModal";
-import { EmployeeFilter } from "@/components/EmployeeFilter";
+import { EmployeeFilter, UNASSIGNED_EMPLOYEE_FILTER } from "@/components/EmployeeFilter";
 import { ErrorState } from "@/components/ErrorState";
 import { InventoryCard } from "@/components/InventoryCard";
 import { ItemFormModal, type ItemFormValues } from "@/components/ItemFormModal";
@@ -83,7 +83,10 @@ export default function Inventory() {
         selectedCategoryId === null || item.categoryId === selectedCategoryId;
       const matchesQuery = query.length === 0 || item.name.toLowerCase().includes(query);
       const matchesEmployee =
-        selectedEmployeeId === null || item.assignedEmployeeIds.includes(selectedEmployeeId);
+        selectedEmployeeId === null ||
+        (selectedEmployeeId === UNASSIGNED_EMPLOYEE_FILTER
+          ? item.assignedEmployeeIds.length === 0
+          : item.assignedEmployeeIds.includes(selectedEmployeeId));
       return matchesCategory && matchesQuery && matchesEmployee;
     });
   }, [items, selectedCategoryId, searchQuery, selectedEmployeeId]);
