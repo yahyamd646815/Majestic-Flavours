@@ -37,7 +37,8 @@ type InventoryState = {
   clearCategoryIds: () => void;
   /** Same empty-set-means-inactive contract as `selectedCategoryIds`. May
    * also contain `UNASSIGNED_EMPLOYEE_FILTER` (see `EmployeeFilter`) as an
-   * ordinary member — it composes through the same OR logic as a real id. */
+   * ordinary member, but matching is not a plain OR once it's mixed with a
+   * real id — see `matchesEmployeeFilter` in `@/lib/inventoryFilters`. */
   selectedEmployeeIds: Set<string>;
   toggleEmployeeId: (employeeId: string) => void;
   clearEmployeeIds: () => void;
@@ -50,7 +51,7 @@ type InventoryState = {
   updateItem: (
     supabase: SupabaseClient,
     id: string,
-    updates: Partial<Omit<InventoryItem, "id" | "createdAt">>,
+    updates: Partial<Omit<InventoryItem, "id" | "createdAt" | "assignedEmployeeIds">>,
   ) => Promise<boolean>;
   deleteItem: (supabase: SupabaseClient, id: string) => Promise<boolean>;
   addEmployeeToItem: (
@@ -150,8 +151,6 @@ export const useInventoryStore = create<InventoryState>()((set, get) => ({
       dbUpdates.current_quantity = updates.currentQuantity;
     if (updates.unitId !== undefined) dbUpdates.unit_id = updates.unitId;
     if (updates.minThreshold !== undefined) dbUpdates.min_threshold = updates.minThreshold;
-    if (updates.assignedEmployeeIds !== undefined)
-      dbUpdates.assigned_employee_ids = updates.assignedEmployeeIds;
 
     const { data, error } = await supabase
       .from("inventory_items")

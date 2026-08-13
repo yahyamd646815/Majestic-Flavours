@@ -13,7 +13,7 @@ A private internal inventory-management app for **Majestic Flavours**, an authen
 
 - Repo: `yahyamd646815/Majestic-Flavours` (public; secrets in gitignored `.env`)
 - Working branch `dev_2` → `main`
-- Local path: `C:\Users\storm\Projects\Majestic_Flavours`
+- Local path: verify the repository path in the current environment rather than assuming one — it varies by machine.
 
 **Yahya** is a beginner developer using this project to learn, with a longer-term goal of Python and commercial apps. His **dad** owns the restaurant and is a software engineer — he defined the requirements and requests features, but is too busy for day-to-day input. **Yahya makes architecture, security, and design decisions himself.**
 
@@ -21,9 +21,11 @@ A private internal inventory-management app for **Majestic Flavours**, an authen
 
 ## Roles
 
-| Role | Can do |
+**This table is the authorization policy — who is *allowed* to do what — not a list of currently-built features.** User management specifically is intended for Admin but is not yet functional; see "What's built" below. Don't treat a row here as confirmation a feature exists yet.
+
+| Role | Authorized to |
 |---|---|
-| **Admin** | Everything, including deletions and user management |
+| **Admin** | Everything, including deletions and user management (once built) |
 | **Manager** | Add items, view all reports, export — no deletions, no user management |
 | **Employee** | Submit/edit daily reports for assigned items only; editable until midnight |
 
@@ -97,7 +99,7 @@ NativeWind setup · design theme · Clerk auth + role-based routing · bottom ta
 
 ## Then — v2, in priority order
 
-1. **This document set.** (Being written now — `PLANNER.md` + this file.)
+1. **This document set.** (Being written now — `ADVISOR.md` + this file.)
 2. **In-app sign-up page** for new users, plus removing/migrating `sampleUsers.ts` to rely directly on Clerk. Yahya has explicitly confirmed he wants this even knowing it may introduce issues — he prefers it that way.
 3. **Collapsible views** — the Admin/Manager "All Time" reports view grouped into month (probably week too) dropdowns; also collapse the units and categories sections on Settings. Yahya may add more Settings requests from his dad at this point.
 4. **`expo-notifications`** for real push on stock-status pings — he wants this *before* the Users page work.
@@ -119,7 +121,7 @@ NativeWind setup · design theme · Clerk auth + role-based routing · bottom ta
 - **Env vars have two sources of truth** — the same five keys exist in both `eas env:set` and `eas.json`'s `env` block. Not a security issue (all are `EXPO_PUBLIC_`, client-visible by design), but they can drift. Worth consolidating to one.
 - **`xlsx@0.18.5`** carries known prototype-pollution/ReDoS advisories. Currently safe because the app only ever *writes* xlsx from its own trusted data and never parses an uploaded one. **If a "bulk-import inventory from Excel" feature is ever built, this needs revisiting** — that's exactly the exposure those advisories describe.
 - **`xlsx` bold headers don't render** — verified by unzipping the output and reading `styles.xml`; cell styling is a SheetJS Pro feature. Column widths do work. Not a bug.
-- **`sampleUsers.ts` whitespace trap** — see `PLANNER.md` §9. Check it first for any assignment/visibility bug.
+- **`sampleUsers.ts` whitespace trap** — see `ADVISOR.md` §9. Check it first for any assignment/visibility bug.
 
 ---
 

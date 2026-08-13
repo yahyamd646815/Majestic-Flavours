@@ -2,16 +2,18 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity } from "react-native";
 
 import type { AssignableEmployee } from "@/lib/assignableEmployees";
 
-/** Sentinel filter value for "items with no assigned employees" — just one
- * more ordinary member of `selectedEmployeeIds`, composing through the same
- * OR logic as a real Clerk user id (no special-casing needed). */
+/** Sentinel filter value for "items with no assigned employees" — an ordinary
+ * member of `selectedEmployeeIds`, but its matching semantics are asymmetric
+ * when combined with real ids. See `matchesEmployeeFilter` in
+ * `@/lib/inventoryFilters` for the actual matching logic. */
 export const UNASSIGNED_EMPLOYEE_FILTER = "unassigned";
 
 type EmployeeFilterProps = {
   employees: AssignableEmployee[];
   /** Empty set means "All" — matches every item, not none. Otherwise one or
-   * more Clerk user ids (plus optionally `UNASSIGNED_EMPLOYEE_FILTER`), OR'd
-   * together against `item.assignedEmployeeIds`. */
+   * more Clerk user ids, optionally plus `UNASSIGNED_EMPLOYEE_FILTER` — see
+   * `matchesEmployeeFilter` in `@/lib/inventoryFilters` for how these combine
+   * (not a plain OR once the sentinel is mixed with a real id). */
   selectedEmployeeIds: Set<string>;
   onToggle: (employeeId: string) => void;
   onClear: () => void;

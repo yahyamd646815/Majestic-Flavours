@@ -77,6 +77,8 @@ Everything in the table above is about verifying a *package's own internals* —
 
 One feature per prompt. Fresh branch. CodeRabbit review. Commit.
 
+**When a prompt is split into parts meant to land as separate commits, say explicitly who commits.** "Commit after each part" is ambiguous — Claude Code will reasonably read it as an instruction to run `git commit` itself, which contradicts the division of labor in §1 (Yahya runs all terminal commands, including git). Say it as: "Stop after each part and tell Yahya it's ready to commit — don't run git yourself." This is a real mistake that happened in this project, not a hypothetical.
+
 ### Rules learned from prompts that went wrong
 
 **Audit the source prompt against the current code before running it.** The original numbered prompt files (01–16) were adapted from a JavaScript Mastery tutorial and written before later reworks. Two of them were materially stale by the time they ran:
@@ -166,7 +168,7 @@ Do not re-litigate these; they are settled.
 - **Snapshot history is append-only**, enforced at both app and RLS level.
 - **Real Clerk user ids** are used for report attribution and item assignment. `sampleUsers.ts` remains only as a hand-maintained role directory, bridged by email — scheduled for removal.
 - Roles live in Clerk `publicMetadata` as lowercase `admin` / `manager` / `employee`.
-- The repo is **public**; secrets live in `.env` (gitignored). All `EXPO_PUBLIC_` keys are client-visible by design and safe in `eas.json`.
+- The repo is **public**; secrets live in `.env` (gitignored). All `EXPO_PUBLIC_` keys are client-visible **by design** and safe in `eas.json` — but that safety comes from what those specific keys are (Clerk's publishable key, Supabase's anon key, PostHog's project key), not from the prefix itself. The Supabase **service** key is never `EXPO_PUBLIC_`-prefixed, never client-side, and never belongs in `eas.json` — it isn't used anywhere in this app's client code at all.
 
 ---
 

@@ -9,7 +9,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { BulkAssignModal } from "@/components/BulkAssignModal";
 import { CategoryFilter } from "@/components/CategoryFilter";
 import { DeleteConfirmModal } from "@/components/DeleteConfirmModal";
-import { EmployeeFilter, UNASSIGNED_EMPLOYEE_FILTER } from "@/components/EmployeeFilter";
+import { EmployeeFilter } from "@/components/EmployeeFilter";
 import { ErrorState } from "@/components/ErrorState";
 import { InventoryCard } from "@/components/InventoryCard";
 import { ItemFormModal, type ItemFormValues } from "@/components/ItemFormModal";
@@ -19,6 +19,7 @@ import { SortToggle } from "@/components/SortToggle";
 import { colors } from "@/constants/theme";
 import { sampleUsers } from "@/data/sampleUsers";
 import { getAssignableEmployees } from "@/lib/assignableEmployees";
+import { matchesEmployeeFilter } from "@/lib/inventoryFilters";
 import { getCategoryName } from "@/lib/inventoryLabels";
 import { useSupabaseClient } from "@/lib/supabase";
 import { useAppUsersStore } from "@/store/appUsersStore";
@@ -95,13 +96,7 @@ export default function Inventory() {
       const matchesCategory =
         selectedCategoryIds.size === 0 || selectedCategoryIds.has(item.categoryId);
       const matchesQuery = query.length === 0 || item.name.toLowerCase().includes(query);
-      const matchesEmployee =
-        selectedEmployeeIds.size === 0 ||
-        [...selectedEmployeeIds].some((employeeId) =>
-          employeeId === UNASSIGNED_EMPLOYEE_FILTER
-            ? item.assignedEmployeeIds.length === 0
-            : item.assignedEmployeeIds.includes(employeeId),
-        );
+      const matchesEmployee = matchesEmployeeFilter(item, selectedEmployeeIds);
       return matchesCategory && matchesQuery && matchesEmployee;
     });
   }, [items, selectedCategoryIds, searchQuery, selectedEmployeeIds]);
