@@ -9,14 +9,18 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { BulkAssignModal } from "@/components/BulkAssignModal";
 import { CategoryFilter } from "@/components/CategoryFilter";
 import { DeleteConfirmModal } from "@/components/DeleteConfirmModal";
+import { EmployeeFilter } from "@/components/EmployeeFilter";
 import { ErrorState } from "@/components/ErrorState";
 import { InventoryCard } from "@/components/InventoryCard";
 import { ItemFormModal, type ItemFormValues } from "@/components/ItemFormModal";
 import { LoadingState } from "@/components/LoadingState";
 import { SearchBar } from "@/components/SearchBar";
 import { colors } from "@/constants/theme";
+import { sampleUsers } from "@/data/sampleUsers";
+import { getAssignableEmployees } from "@/lib/assignableEmployees";
 import { getCategoryName } from "@/lib/inventoryLabels";
 import { useSupabaseClient } from "@/lib/supabase";
+import { useAppUsersStore } from "@/store/appUsersStore";
 import { useInventoryStore } from "@/store/inventoryStore";
 import { useUnitsStore } from "@/store/unitsStore";
 import type { InventoryItem } from "@/types/inventory";
@@ -52,6 +56,13 @@ export default function Inventory() {
   // fields reset from scratch instead of carrying over the previous session.
   const [formSession, setFormSession] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
+
+  const appUsers = useAppUsersStore((state) => state.users);
+  const assignableEmployees = useMemo(
+    () => getAssignableEmployees(sampleUsers, appUsers),
+    [appUsers],
+  );
 
   // Bulk assignment. `selectedItemIds` deliberately survives search/category
   // filter changes — that is what lets one action cover items from several
@@ -71,9 +82,11 @@ export default function Inventory() {
       const matchesCategory =
         selectedCategoryId === null || item.categoryId === selectedCategoryId;
       const matchesQuery = query.length === 0 || item.name.toLowerCase().includes(query);
-      return matchesCategory && matchesQuery;
+      const matchesEmployee =
+        selectedEmployeeId === null || item.assignedEmployeeIds.includes(selectedEmployeeId);
+      return matchesCategory && matchesQuery && matchesEmployee;
     });
-  }, [items, selectedCategoryId, searchQuery]);
+  }, [items, selectedCategoryId, searchQuery, selectedEmployeeId]);
 
   // Admin and Manager both, matching what individual item editing already
   // allows — bulk assignment is not an Admin-only action.
@@ -304,6 +317,12 @@ export default function Inventory() {
               categories={categories}
               selectedCategoryId={selectedCategoryId}
               onSelect={setSelectedCategoryId}
+            />
+
+            <EmployeeFilter
+              employees={assignableEmployees}
+              selectedEmployeeId={selectedEmployeeId}
+              onSelect={setSelectedEmployeeId}
             />
 
             <FlatList
