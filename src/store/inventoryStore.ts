@@ -44,6 +44,16 @@ type InventoryState = {
     updates: Partial<Omit<InventoryItem, "id" | "createdAt">>,
   ) => Promise<boolean>;
   deleteItem: (supabase: SupabaseClient, id: string) => Promise<boolean>;
+  addEmployeeToItem: (
+    supabase: SupabaseClient,
+    itemId: string,
+    employeeId: string,
+  ) => Promise<boolean>;
+  removeEmployeeFromItem: (
+    supabase: SupabaseClient,
+    itemId: string,
+    employeeId: string,
+  ) => Promise<boolean>;
   addCategory: (supabase: SupabaseClient, name: string) => Promise<boolean>;
   isCategoryInUse: (categoryId: string) => boolean;
   deleteCategory: (supabase: SupabaseClient, id: string) => Promise<boolean>;
@@ -138,6 +148,51 @@ export const useInventoryStore = create<InventoryState>()((set, get) => ({
     const { error } = await supabase.from("inventory_items").delete().eq("id", id);
     if (error) return false;
     set((state) => ({ items: state.items.filter((item) => item.id !== id) }));
+    return true;
+  },
+
+  // These two go through atomic RPCs rather than a client-computed full-array
+  // overwrite (see supabase-rpc-employee-assignment.sql) — the database reads
+  // and writes assigned_employee_ids in the same statement, so two concurrent
+  // callers can't silently drop each other's change. The RPC computes the new
+  // array server-side, so the client doesn't automatically know its new
+  // contents; each mutation is deterministic (append/remove one id), so it's
+  // safe to apply the same transformation to local state optimistically
+  // rather than refetch the item.
+  addEmployeeToItem: async (supabase, itemId, employeeId) => {
+    const { error } = await supabase.rpc("add_employee_to_item", {
+      p_item_id: itemId,
+      p_employee_id: employeeId,
+    });
+    if (error) return false;
+
+    set((state) => ({
+      items: state.items.map((item) =>
+        item.id === itemId && !item.assignedEmployeeIds.includes(employeeId)
+          ? { ...item, assignedEmployeeIds: [...item.assignedEmployeeIds, employeeId] }
+          : item,
+      ),
+    }));
+    return true;
+  },
+
+  removeEmployeeFromItem: async (supabase, itemId, employeeId) => {
+    const { error } = await supabase.rpc("remove_employee_from_item", {
+      p_item_id: itemId,
+      p_employee_id: employeeId,
+    });
+    if (error) return false;
+
+    set((state) => ({
+      items: state.items.map((item) =>
+        item.id === itemId
+          ? {
+              ...item,
+              assignedEmployeeIds: item.assignedEmployeeIds.filter((id) => id !== employeeId),
+            }
+          : item,
+      ),
+    }));
     return true;
   },
 

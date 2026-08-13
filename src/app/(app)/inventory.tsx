@@ -41,6 +41,8 @@ export default function Inventory() {
   const addItem = useInventoryStore((state) => state.addItem);
   const updateItem = useInventoryStore((state) => state.updateItem);
   const deleteItem = useInventoryStore((state) => state.deleteItem);
+  const addEmployeeToItem = useInventoryStore((state) => state.addEmployeeToItem);
+  const removeEmployeeFromItem = useInventoryStore((state) => state.removeEmployeeFromItem);
   const posthog = usePostHog();
 
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -115,16 +117,10 @@ export default function Inventory() {
     try {
       const targets = items.filter((item) => selectedItemIds.has(item.id));
 
+      // The RPC is already idempotent (append-if-absent), so there's no need
+      // to short-circuit already-assigned items client-side.
       const results = await Promise.all(
-        targets.map((item) => {
-          // Additive only: an item that already has this employee is left
-          // untouched rather than re-written, so there is no duplicate id and
-          // no spurious failure. Existing assignments are never removed.
-          if (item.assignedEmployeeIds.includes(employeeId)) return true;
-          return updateItem(supabase, item.id, {
-            assignedEmployeeIds: [...item.assignedEmployeeIds, employeeId],
-          });
-        }),
+        targets.map((item) => addEmployeeToItem(supabase, item.id, employeeId)),
       );
 
       const failedCount = results.filter((succeeded) => !succeeded).length;
@@ -160,9 +156,31 @@ export default function Inventory() {
   }
 
   async function handleSubmit(values: ItemFormValues) {
-    const succeeded = editItem
-      ? await updateItem(supabase, editItem.id, values)
-      : await addItem(supabase, values);
+    let succeeded: boolean;
+
+    if (editItem) {
+      // assignedEmployeeIds is diffed against the item as it was when the
+      // form opened and sent through the atomic add/remove RPCs instead of a
+      // full-array overwrite in the same updateItem call — see
+      // addEmployeeToItem/removeEmployeeFromItem for why.
+      const { assignedEmployeeIds, ...rest } = values;
+      const originalEmployeeIds = editItem.assignedEmployeeIds;
+      const addedEmployeeIds = assignedEmployeeIds.filter(
+        (id) => !originalEmployeeIds.includes(id),
+      );
+      const removedEmployeeIds = originalEmployeeIds.filter(
+        (id) => !assignedEmployeeIds.includes(id),
+      );
+
+      const results = await Promise.all([
+        updateItem(supabase, editItem.id, rest),
+        ...addedEmployeeIds.map((id) => addEmployeeToItem(supabase, editItem.id, id)),
+        ...removedEmployeeIds.map((id) => removeEmployeeFromItem(supabase, editItem.id, id)),
+      ]);
+      succeeded = results.every(Boolean);
+    } else {
+      succeeded = await addItem(supabase, values);
+    }
 
     if (succeeded) {
       closeForm();
