@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useMemo, useState } from "react";
 import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
-import { colors, radii, spacing } from "@/constants/theme";
+import { colors, spacing } from "@/constants/theme";
 import { sampleUsers } from "@/data/sampleUsers";
 import { getAssignableEmployees } from "@/lib/assignableEmployees";
 import { useAppUsersStore } from "@/store/appUsersStore";
@@ -60,8 +60,8 @@ export function BulkAssignModal({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.overlay}>
-        <View style={styles.sheet}>
+      <View className="flex-1 justify-end bg-black/50">
+        <View className="max-h-[85%] rounded-t-2xl bg-white p-6">
           <ScrollView contentContainerStyle={styles.scrollContent}>
             <Text className="font-inter-bold text-xl text-maroon">
               {mode === "assign" ? "Assign Employee" : "Unassign Employee"}
@@ -172,10 +172,9 @@ export function BulkAssignModal({
                 <Text className="font-inter-semibold text-base text-text-primary">Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                className="btn-primary flex-1"
+                className={canSubmit ? "btn-primary flex-1" : "btn-primary flex-1 opacity-50"}
                 activeOpacity={canSubmit ? 0.85 : 1}
                 disabled={!canSubmit}
-                style={canSubmit ? undefined : styles.disabled}
                 onPress={() => {
                   if (selectedClerkUserId === null) return;
                   if (mode === "assign") onAssign(selectedClerkUserId);
@@ -200,23 +199,11 @@ export function BulkAssignModal({
   );
 }
 
+// ScrollView's contentContainerStyle isn't a NativeWind-stylable prop in the
+// version installed here (see AGENTS.md's Style Exception Rules), so this one
+// stays StyleSheet while everything else above moved to className.
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    justifyContent: "flex-end",
-    backgroundColor: "rgba(0,0,0,0.5)",
-  },
-  sheet: {
-    maxHeight: "85%",
-    backgroundColor: colors.white,
-    borderTopLeftRadius: radii.lg,
-    borderTopRightRadius: radii.lg,
-    padding: spacing.lg,
-  },
   scrollContent: {
     paddingBottom: spacing.lg,
-  },
-  disabled: {
-    opacity: 0.5,
   },
 });

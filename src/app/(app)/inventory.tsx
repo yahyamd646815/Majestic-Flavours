@@ -400,10 +400,9 @@ export default function Inventory() {
             </Text>
 
             <TouchableOpacity
-              className="chip"
+              className={filteredItems.length === 0 ? "chip opacity-50" : "chip"}
               activeOpacity={0.8}
               disabled={filteredItems.length === 0}
-              style={filteredItems.length === 0 ? styles.disabled : undefined}
               onPress={toggleSelectAllVisible}
             >
               <Text className="chip__text">
@@ -422,10 +421,9 @@ export default function Inventory() {
             </TouchableOpacity>
 
             <TouchableOpacity
-              className="btn-primary flex-1"
+              className={selectedCount === 0 ? "btn-primary flex-1 opacity-50" : "btn-primary flex-1"}
               activeOpacity={selectedCount === 0 ? 1 : 0.85}
               disabled={selectedCount === 0}
-              style={selectedCount === 0 ? styles.disabled : undefined}
               onPress={() => {
                 setAssignSession((session) => session + 1);
                 setIsAssignOpen(true);
@@ -491,8 +489,5 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 6,
     elevation: 6,
-  },
-  disabled: {
-    opacity: 0.5,
   },
 });
