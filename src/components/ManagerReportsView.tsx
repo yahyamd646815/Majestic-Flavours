@@ -5,6 +5,7 @@ import { Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from "react
 import { ReportCard } from "@/components/ReportCard";
 import { ReportDetailModal } from "@/components/ReportDetailModal";
 import { ReportFilters } from "@/components/ReportFilters";
+import { SortToggle } from "@/components/SortToggle";
 import { colors } from "@/constants/theme";
 import { sampleUsers } from "@/data/sampleUsers";
 import { bridgeRosterByEmail } from "@/lib/assignableEmployees";
@@ -27,6 +28,10 @@ import type { AppUser, InventoryItem, Report, Unit } from "@/types/inventory";
 
 type ReporterCandidate = AppUser & { clerkUserId?: string };
 
+// A string union (not a boolean) so a third "by status" mode, once the ping
+// feature ships, is just another value — not a redesign of the toggle.
+type ReportSortMode = "default" | "alphabetical";
+
 type ManagerReportsViewProps = {
   footer: ReactElement;
   /** Switches the Reports screen over to the signed-in user's own report. */
@@ -48,6 +53,7 @@ export function ManagerReportsView({ footer, onSelfReport }: ManagerReportsViewP
   const [categoryIds, setCategoryIds] = useState<Set<string>>(new Set());
   const [detailReportId, setDetailReportId] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [sortMode, setSortMode] = useState<ReportSortMode>("default");
 
   function toggleReporterId(reporterId: string) {
     setReporterIds((current) => {
@@ -91,33 +97,37 @@ export function ManagerReportsView({ footer, onSelfReport }: ManagerReportsViewP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reports, reporters, getReportForReporterAndDate, todayIsoDate]);
 
-  const todayRows = useMemo(
-    () =>
-      todayReporterCandidates
-        .filter((reporter) => reporterIds.size === 0 || reporterIds.has(reporter.id))
-        .map((reporter) => ({
-          reporter,
-          report: reporter.clerkUserId
-            ? getReportForReporterAndDate(reporter.clerkUserId, todayIsoDate)
-            : undefined,
-        }))
-        .filter(({ reporter, report }) => {
-          if (categoryIds.size === 0) return true;
-          if (report) return reportMatchesAnyCategory(report, items, categoryIds);
-          return items.some(
-            (item) =>
-              categoryIds.has(item.categoryId) && item.assignedEmployeeIds.includes(reporter.id),
-          );
-        }),
-    [
-      todayReporterCandidates,
-      getReportForReporterAndDate,
-      reporterIds,
-      categoryIds,
-      items,
-      todayIsoDate,
-    ],
-  );
+  const todayRows = useMemo(() => {
+    const matched = todayReporterCandidates
+      .filter((reporter) => reporterIds.size === 0 || reporterIds.has(reporter.id))
+      .map((reporter) => ({
+        reporter,
+        report: reporter.clerkUserId
+          ? getReportForReporterAndDate(reporter.clerkUserId, todayIsoDate)
+          : undefined,
+      }))
+      .filter(({ reporter, report }) => {
+        if (categoryIds.size === 0) return true;
+        if (report) return reportMatchesAnyCategory(report, items, categoryIds);
+        return items.some(
+          (item) =>
+            categoryIds.has(item.categoryId) && item.assignedEmployeeIds.includes(reporter.id),
+        );
+      });
+
+    if (sortMode === "alphabetical") {
+      return [...matched].sort((a, b) => a.reporter.name.localeCompare(b.reporter.name));
+    }
+    return matched;
+  }, [
+    todayReporterCandidates,
+    getReportForReporterAndDate,
+    reporterIds,
+    categoryIds,
+    items,
+    todayIsoDate,
+    sortMode,
+  ]);
 
   // Reporters without a synced Clerk id can never own a report (reports are
   // keyed on real Clerk ids), so they're dropped here rather than producing
@@ -132,20 +142,45 @@ export function ManagerReportsView({ footer, onSelfReport }: ManagerReportsViewP
     [reporters, reporterIds],
   );
 
-  const historicalReports = useMemo(
-    () =>
-      reports
-        .filter((report) => {
-          if (!matchesDateFilter(report.date, dateFilter, todayIsoDate)) return false;
-          if (reporterIds.size > 0 && !selectedReporterClerkIds.has(report.reporterId))
-            return false;
-          if (categoryIds.size > 0 && !reportMatchesAnyCategory(report, items, categoryIds))
-            return false;
-          return true;
-        })
-        .sort((a, b) => b.date.localeCompare(a.date)),
-    [reports, items, dateFilter, reporterIds, selectedReporterClerkIds, categoryIds, todayIsoDate],
-  );
+  // Reports store reporterId as a Clerk id, not a display name — resolved
+  // here once for the alphabetical sort below, same bridge the rest of this
+  // view already uses.
+  const reporterNameByClerkId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const reporter of reporters) {
+      if (reporter.clerkUserId !== undefined) map.set(reporter.clerkUserId, reporter.name);
+    }
+    return map;
+  }, [reporters]);
+
+  const historicalReports = useMemo(() => {
+    const matched = reports.filter((report) => {
+      if (!matchesDateFilter(report.date, dateFilter, todayIsoDate)) return false;
+      if (reporterIds.size > 0 && !selectedReporterClerkIds.has(report.reporterId)) return false;
+      if (categoryIds.size > 0 && !reportMatchesAnyCategory(report, items, categoryIds))
+        return false;
+      return true;
+    });
+
+    if (sortMode === "alphabetical") {
+      return [...matched].sort((a, b) => {
+        const nameA = reporterNameByClerkId.get(a.reporterId) ?? "";
+        const nameB = reporterNameByClerkId.get(b.reporterId) ?? "";
+        return nameA.localeCompare(nameB);
+      });
+    }
+    return [...matched].sort((a, b) => b.date.localeCompare(a.date));
+  }, [
+    reports,
+    items,
+    dateFilter,
+    reporterIds,
+    selectedReporterClerkIds,
+    categoryIds,
+    todayIsoDate,
+    sortMode,
+    reporterNameByClerkId,
+  ]);
 
   const detailReport = reports.find((report) => report.id === detailReportId);
 
@@ -236,6 +271,16 @@ export function ManagerReportsView({ footer, onSelfReport }: ManagerReportsViewP
         selectedCategoryIds={categoryIds}
         onCategoryToggle={toggleCategoryId}
         onCategoryClear={() => setCategoryIds(new Set())}
+      />
+
+      <SortToggle
+        label="Sort"
+        options={[
+          { value: "default", label: "Default" },
+          { value: "alphabetical", label: "By Reporter" },
+        ]}
+        value={sortMode}
+        onChange={setSortMode}
       />
 
       {dateFilter === "today" ? (

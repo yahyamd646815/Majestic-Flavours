@@ -15,6 +15,7 @@ import { InventoryCard } from "@/components/InventoryCard";
 import { ItemFormModal, type ItemFormValues } from "@/components/ItemFormModal";
 import { LoadingState } from "@/components/LoadingState";
 import { SearchBar } from "@/components/SearchBar";
+import { SortToggle } from "@/components/SortToggle";
 import { colors } from "@/constants/theme";
 import { sampleUsers } from "@/data/sampleUsers";
 import { getAssignableEmployees } from "@/lib/assignableEmployees";
@@ -25,6 +26,10 @@ import { useInventoryStore } from "@/store/inventoryStore";
 import { useUnitsStore } from "@/store/unitsStore";
 import type { InventoryItem } from "@/types/inventory";
 import { parseRole } from "@/types/role";
+
+// A string union (not a boolean) so a third "by status" mode, once the ping
+// feature ships, is just another value — not a redesign of the toggle.
+type InventorySortMode = "default" | "alphabetical";
 
 export default function Inventory() {
   const { user } = useUser();
@@ -60,6 +65,7 @@ export default function Inventory() {
   // fields reset from scratch instead of carrying over the previous session.
   const [formSession, setFormSession] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
+  const [sortMode, setSortMode] = useState<InventorySortMode>("default");
 
   const appUsers = useAppUsersStore((state) => state.users);
   const assignableEmployees = useMemo(
@@ -99,6 +105,11 @@ export default function Inventory() {
       return matchesCategory && matchesQuery && matchesEmployee;
     });
   }, [items, selectedCategoryIds, searchQuery, selectedEmployeeIds]);
+
+  const sortedItems = useMemo(() => {
+    if (sortMode !== "alphabetical") return filteredItems;
+    return [...filteredItems].sort((a, b) => a.name.localeCompare(b.name));
+  }, [filteredItems, sortMode]);
 
   // Admin and Manager both, matching what individual item editing already
   // allows — bulk assignment is not an Admin-only action.
@@ -339,9 +350,19 @@ export default function Inventory() {
               onClear={clearEmployeeIds}
             />
 
+            <SortToggle
+              label="Sort"
+              options={[
+                { value: "default", label: "Default" },
+                { value: "alphabetical", label: "A–Z" },
+              ]}
+              value={sortMode}
+              onChange={setSortMode}
+            />
+
             <FlatList
               className="flex-1"
-              data={filteredItems}
+              data={sortedItems}
               keyExtractor={(item) => item.id}
               contentContainerStyle={styles.listContent}
               ItemSeparatorComponent={() => <View className="h-3" />}
