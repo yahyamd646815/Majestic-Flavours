@@ -3,6 +3,7 @@ import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View 
 
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { sampleUsers } from "@/data/sampleUsers";
+import { getAssignableEmployees } from "@/lib/assignableEmployees";
 import { useAppUsersStore } from "@/store/appUsersStore";
 import { useInventoryStore } from "@/store/inventoryStore";
 import { useUnitsStore } from "@/store/unitsStore";
@@ -24,18 +25,7 @@ export function ItemFormModal({ visible, item, onClose, onSubmit }: ItemFormModa
   const appUsersLoading = useAppUsersStore((state) => state.isLoading);
 
   const assignableEmployees = useMemo(
-    () =>
-      sampleUsers
-        .filter((user) => user.role === "employee")
-        .map((sampleUser) => {
-          const targetEmail = sampleUser.email.toLowerCase();
-          const synced = appUsers.find((appUser) => appUser.email.toLowerCase() === targetEmail);
-          return {
-            ...sampleUser,
-            name: synced?.name ?? sampleUser.name,
-            clerkUserId: synced?.clerkUserId,
-          };
-        }),
+    () => getAssignableEmployees(sampleUsers, appUsers),
     [appUsers],
   );
 

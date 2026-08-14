@@ -44,15 +44,17 @@ export function formatSnapshotTime(isoTimestamp: string): string {
   return parsed.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 }
 
-/** A report matches a category when any item it touched belongs to that category. */
-export function reportMatchesCategory(
+/** A report matches when any item it touched belongs to one of the given
+ * categories. Callers are expected to treat an empty `categoryIds` set as
+ * "filter inactive" themselves — this only checks actual membership. */
+export function reportMatchesAnyCategory(
   report: Report,
   items: InventoryItem[],
-  categoryId: string,
+  categoryIds: Set<string>,
 ): boolean {
   return report.itemEntries.some((entry) => {
     const item = items.find((candidate) => candidate.id === entry.itemId);
-    return item?.categoryId === categoryId;
+    return item !== undefined && categoryIds.has(item.categoryId);
   });
 }
 

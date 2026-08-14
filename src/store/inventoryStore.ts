@@ -30,8 +30,18 @@ type InventoryState = {
   categories: Category[];
   isLoading: boolean;
   error: string | null;
-  selectedCategoryId: string | null;
-  setSelectedCategoryId: (categoryId: string | null) => void;
+  /** Empty set means the filter dimension is inactive — matches every item,
+   * not none. See `toggleCategoryId`/`toggleEmployeeId`. */
+  selectedCategoryIds: Set<string>;
+  toggleCategoryId: (categoryId: string) => void;
+  clearCategoryIds: () => void;
+  /** Same empty-set-means-inactive contract as `selectedCategoryIds`. May
+   * also contain `UNASSIGNED_EMPLOYEE_FILTER` (see `EmployeeFilter`) as an
+   * ordinary member, but matching is not a plain OR once it's mixed with a
+   * real id — see `matchesEmployeeFilter` in `@/lib/inventoryFilters`. */
+  selectedEmployeeIds: Set<string>;
+  toggleEmployeeId: (employeeId: string) => void;
+  clearEmployeeIds: () => void;
   getLowStockItems: () => InventoryItem[];
   fetchAll: (supabase: SupabaseClient) => Promise<void>;
   addItem: (
@@ -41,9 +51,19 @@ type InventoryState = {
   updateItem: (
     supabase: SupabaseClient,
     id: string,
-    updates: Partial<Omit<InventoryItem, "id" | "createdAt">>,
+    updates: Partial<Omit<InventoryItem, "id" | "createdAt" | "assignedEmployeeIds">>,
   ) => Promise<boolean>;
   deleteItem: (supabase: SupabaseClient, id: string) => Promise<boolean>;
+  addEmployeeToItem: (
+    supabase: SupabaseClient,
+    itemId: string,
+    employeeId: string,
+  ) => Promise<boolean>;
+  removeEmployeeFromItem: (
+    supabase: SupabaseClient,
+    itemId: string,
+    employeeId: string,
+  ) => Promise<boolean>;
   addCategory: (supabase: SupabaseClient, name: string) => Promise<boolean>;
   isCategoryInUse: (categoryId: string) => boolean;
   deleteCategory: (supabase: SupabaseClient, id: string) => Promise<boolean>;
@@ -54,8 +74,24 @@ export const useInventoryStore = create<InventoryState>()((set, get) => ({
   categories: [],
   isLoading: true,
   error: null,
-  selectedCategoryId: null,
-  setSelectedCategoryId: (categoryId) => set({ selectedCategoryId: categoryId }),
+  selectedCategoryIds: new Set(),
+  toggleCategoryId: (categoryId) =>
+    set((state) => {
+      const next = new Set(state.selectedCategoryIds);
+      if (next.has(categoryId)) next.delete(categoryId);
+      else next.add(categoryId);
+      return { selectedCategoryIds: next };
+    }),
+  clearCategoryIds: () => set({ selectedCategoryIds: new Set() }),
+  selectedEmployeeIds: new Set(),
+  toggleEmployeeId: (employeeId) =>
+    set((state) => {
+      const next = new Set(state.selectedEmployeeIds);
+      if (next.has(employeeId)) next.delete(employeeId);
+      else next.add(employeeId);
+      return { selectedEmployeeIds: next };
+    }),
+  clearEmployeeIds: () => set({ selectedEmployeeIds: new Set() }),
   getLowStockItems: () =>
     get().items.filter((item) => item.currentQuantity <= item.minThreshold),
 
@@ -115,8 +151,6 @@ export const useInventoryStore = create<InventoryState>()((set, get) => ({
       dbUpdates.current_quantity = updates.currentQuantity;
     if (updates.unitId !== undefined) dbUpdates.unit_id = updates.unitId;
     if (updates.minThreshold !== undefined) dbUpdates.min_threshold = updates.minThreshold;
-    if (updates.assignedEmployeeIds !== undefined)
-      dbUpdates.assigned_employee_ids = updates.assignedEmployeeIds;
 
     const { data, error } = await supabase
       .from("inventory_items")
@@ -138,6 +172,43 @@ export const useInventoryStore = create<InventoryState>()((set, get) => ({
     const { error } = await supabase.from("inventory_items").delete().eq("id", id);
     if (error) return false;
     set((state) => ({ items: state.items.filter((item) => item.id !== id) }));
+    return true;
+  },
+
+  // These two go through atomic RPCs rather than a client-computed full-array
+  // overwrite (see supabase-rpc-employee-assignment-v2.sql) — the database
+  // reads and writes assigned_employee_ids in the same statement, so two
+  // concurrent callers can't silently drop each other's change. The RPCs
+  // return the updated row via RETURNING *, so local state is synced from
+  // what the database actually wrote rather than an optimistic guess.
+  addEmployeeToItem: async (supabase, itemId, employeeId) => {
+    const { data, error } = await supabase.rpc("add_employee_to_item", {
+      p_item_id: itemId,
+      p_employee_id: employeeId,
+    });
+    // A row-returning RPC comes back as an array. Empty means RLS or a
+    // missing id silently matched nothing — treat that as failure too, not
+    // just an explicit error, since the write genuinely didn't happen.
+    if (error || !data || data.length === 0) return false;
+
+    const updatedItem = mapDbItemToItem(data[0]);
+    set((state) => ({
+      items: state.items.map((item) => (item.id === itemId ? updatedItem : item)),
+    }));
+    return true;
+  },
+
+  removeEmployeeFromItem: async (supabase, itemId, employeeId) => {
+    const { data, error } = await supabase.rpc("remove_employee_from_item", {
+      p_item_id: itemId,
+      p_employee_id: employeeId,
+    });
+    if (error || !data || data.length === 0) return false;
+
+    const updatedItem = mapDbItemToItem(data[0]);
+    set((state) => ({
+      items: state.items.map((item) => (item.id === itemId ? updatedItem : item)),
+    }));
     return true;
   },
 

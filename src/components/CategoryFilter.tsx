@@ -4,41 +4,44 @@ import type { Category } from "@/types/inventory";
 
 type CategoryFilterProps = {
   categories: Category[];
-  /** `null` means "All". Otherwise a `Category.id`, matched against `item.categoryId`. */
-  selectedCategoryId: string | null;
-  onSelect: (categoryId: string | null) => void;
+  /** Empty set means "All" — matches every item, not none. Otherwise one or
+   * more `Category.id`s, OR'd together against `item.categoryId`. */
+  selectedCategoryIds: Set<string>;
+  onToggle: (categoryId: string) => void;
+  onClear: () => void;
 };
 
 export function CategoryFilter({
   categories,
-  selectedCategoryId,
-  onSelect,
+  selectedCategoryIds,
+  onToggle,
+  onClear,
 }: CategoryFilterProps) {
-  const isAllActive = selectedCategoryId === null;
+  const isAllActive = selectedCategoryIds.size === 0;
 
   return (
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
-      style={styles.scrollView}
+      className="grow-0"
       contentContainerStyle={styles.content}
     >
       <TouchableOpacity
         className={isAllActive ? "chip chip--active" : "chip"}
         activeOpacity={0.8}
-        onPress={() => onSelect(null)}
+        onPress={onClear}
       >
         <Text className={isAllActive ? "chip__text chip__text--active" : "chip__text"}>All</Text>
       </TouchableOpacity>
 
       {categories.map((category) => {
-        const isActive = selectedCategoryId === category.id;
+        const isActive = selectedCategoryIds.has(category.id);
         return (
           <TouchableOpacity
             key={category.id}
             className={isActive ? "chip chip--active" : "chip"}
             activeOpacity={0.8}
-            onPress={() => onSelect(category.id)}
+            onPress={() => onToggle(category.id)}
           >
             <Text className={isActive ? "chip__text chip__text--active" : "chip__text"}>
               {category.name}
@@ -51,9 +54,6 @@ export function CategoryFilter({
 }
 
 const styles = StyleSheet.create({
-  scrollView: {
-    flexGrow: 0,
-  },
   content: {
     gap: 8,
     paddingHorizontal: 16,
