@@ -176,46 +176,38 @@ export const useInventoryStore = create<InventoryState>()((set, get) => ({
   },
 
   // These two go through atomic RPCs rather than a client-computed full-array
-  // overwrite (see supabase-rpc-employee-assignment.sql) — the database reads
-  // and writes assigned_employee_ids in the same statement, so two concurrent
-  // callers can't silently drop each other's change. The RPC computes the new
-  // array server-side, so the client doesn't automatically know its new
-  // contents; each mutation is deterministic (append/remove one id), so it's
-  // safe to apply the same transformation to local state optimistically
-  // rather than refetch the item.
+  // overwrite (see supabase-rpc-employee-assignment-v2.sql) — the database
+  // reads and writes assigned_employee_ids in the same statement, so two
+  // concurrent callers can't silently drop each other's change. The RPCs
+  // return the updated row via RETURNING *, so local state is synced from
+  // what the database actually wrote rather than an optimistic guess.
   addEmployeeToItem: async (supabase, itemId, employeeId) => {
-    const { error } = await supabase.rpc("add_employee_to_item", {
+    const { data, error } = await supabase.rpc("add_employee_to_item", {
       p_item_id: itemId,
       p_employee_id: employeeId,
     });
-    if (error) return false;
+    // A row-returning RPC comes back as an array. Empty means RLS or a
+    // missing id silently matched nothing — treat that as failure too, not
+    // just an explicit error, since the write genuinely didn't happen.
+    if (error || !data || data.length === 0) return false;
 
+    const updatedItem = mapDbItemToItem(data[0]);
     set((state) => ({
-      items: state.items.map((item) =>
-        item.id === itemId && !item.assignedEmployeeIds.includes(employeeId)
-          ? { ...item, assignedEmployeeIds: [...item.assignedEmployeeIds, employeeId] }
-          : item,
-      ),
+      items: state.items.map((item) => (item.id === itemId ? updatedItem : item)),
     }));
     return true;
   },
 
   removeEmployeeFromItem: async (supabase, itemId, employeeId) => {
-    const { error } = await supabase.rpc("remove_employee_from_item", {
+    const { data, error } = await supabase.rpc("remove_employee_from_item", {
       p_item_id: itemId,
       p_employee_id: employeeId,
     });
-    if (error) return false;
+    if (error || !data || data.length === 0) return false;
 
+    const updatedItem = mapDbItemToItem(data[0]);
     set((state) => ({
-      items: state.items.map((item) =>
-        item.id === itemId
-          ? {
-              ...item,
-              assignedEmployeeIds: item.assignedEmployeeIds.filter((id) => id !== employeeId),
-            }
-          : item,
-      ),
+      items: state.items.map((item) => (item.id === itemId ? updatedItem : item)),
     }));
     return true;
   },

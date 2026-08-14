@@ -4,7 +4,7 @@ Read AGENTS.md first and follow it strictly.
 
 ## Task
 
-Commit after each lettered part below, not as one combined diff.
+Commit after each lettered part below, not as one combined diff — meaning stop and tell Yahya it's ready, don't run git yourself (he runs all terminal commands with side effects outside the repo's own files, per AGENTS.md/ADVISOR.md's division of labor).
 
 ---
 
@@ -29,7 +29,7 @@ Add an "Unassigned" chip to the same row, alongside "All" and the per-employee c
 - Don't convert either filter to multi-select yet — later prompt.
 - Don't touch alphabetical sort or the NativeWind cleanup — later prompt.
 - Strict TypeScript, no `any`.
-- Commit after each lettered part.
+- Stop after each lettered part and tell Yahya it's ready to commit — don't run git yourself.
 - Run `npm run lint`, `npm run typecheck`, and `npm run test` after every part.
 
 ## Reference

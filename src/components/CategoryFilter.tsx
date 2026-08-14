@@ -23,7 +23,7 @@ export function CategoryFilter({
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
-      style={styles.scrollView}
+      className="grow-0"
       contentContainerStyle={styles.content}
     >
       <TouchableOpacity
@@ -54,9 +54,6 @@ export function CategoryFilter({
 }
 
 const styles = StyleSheet.create({
-  scrollView: {
-    flexGrow: 0,
-  },
   content: {
     gap: 8,
     paddingHorizontal: 16,

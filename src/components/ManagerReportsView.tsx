@@ -109,9 +109,11 @@ export function ManagerReportsView({ footer, onSelfReport }: ManagerReportsViewP
       .filter(({ reporter, report }) => {
         if (categoryIds.size === 0) return true;
         if (report) return reportMatchesAnyCategory(report, items, categoryIds);
+        if (reporter.clerkUserId === undefined) return false;
         return items.some(
           (item) =>
-            categoryIds.has(item.categoryId) && item.assignedEmployeeIds.includes(reporter.id),
+            categoryIds.has(item.categoryId) &&
+            item.assignedEmployeeIds.includes(reporter.clerkUserId as string),
         );
       });
 

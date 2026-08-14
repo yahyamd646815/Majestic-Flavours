@@ -93,7 +93,7 @@ function FilterRow({ label, children }: { label: string; children: ReactNode }) 
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        style={styles.scrollView}
+        className="grow-0"
         contentContainerStyle={styles.content}
       >
         {children}
@@ -126,9 +126,6 @@ function FilterChip({
 }
 
 const styles = StyleSheet.create({
-  scrollView: {
-    flexGrow: 0,
-  },
   content: {
     gap: 8,
     paddingHorizontal: 16,
