@@ -8,9 +8,11 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
+import { StockStatusBadge } from "@/components/StockStatusBadge";
 import { colors } from "@/constants/theme";
 import { getAssignedNames } from "@/lib/getAssignedNames";
 import { getCategoryName, getUnitLabel } from "@/lib/inventoryLabels";
+import { getEffectiveStatus } from "@/lib/stockStatus";
 import { useSupabaseClient } from "@/lib/supabase";
 import { useAppUsersStore } from "@/store/appUsersStore";
 import { useInventoryStore } from "@/store/inventoryStore";
@@ -67,10 +69,13 @@ export default function Dashboard() {
   });
 
   const totalItems = items.length;
-  const outOfStockCount = items.filter((item) => item.currentQuantity === 0).length;
-  const lowStockCount = items.filter(
-    (item) => item.currentQuantity > 0 && item.currentQuantity <= item.minThreshold,
+  // Counted through `getEffectiveStatus`, exactly like `getLowStockItems`
+  // below and the Inventory card badges — so a manually pinged status can
+  // never make these three disagree with each other.
+  const outOfStockCount = items.filter(
+    (item) => getEffectiveStatus(item) === "out_of_stock",
   ).length;
+  const lowStockCount = items.filter((item) => getEffectiveStatus(item) === "low_stock").length;
 
   const alertItems = getLowStockItems();
 
@@ -129,13 +134,7 @@ export default function Dashboard() {
                   </View>
                 ) : (
                   alertItems.map((item) => {
-                    const isOutOfStock = item.currentQuantity === 0;
-                    const badgeClass = isOutOfStock
-                      ? "status-badge status-badge--out-of-stock"
-                      : "status-badge status-badge--low-stock";
-                    const badgeTextClass = isOutOfStock
-                      ? "status-badge__text--out-of-stock"
-                      : "status-badge__text--low-stock";
+                    const status = getEffectiveStatus(item);
                     const assignedNames = getAssignedNames(item.assignedEmployeeIds, appUsers);
 
                     return (
@@ -149,11 +148,10 @@ export default function Dashboard() {
                               {getCategoryName(categories, item.categoryId)}
                             </Text>
                           </View>
-                          <View className={badgeClass}>
-                            <Text className={badgeTextClass}>
-                              {isOutOfStock ? "Out of Stock" : "Low Stock"}
-                            </Text>
-                          </View>
+                          <StockStatusBadge
+                            status={status}
+                            isOverridden={item.statusOverride !== null}
+                          />
                         </View>
 
                         <Text className="font-inter text-sm text-text-primary">

@@ -107,6 +107,7 @@ const items: InventoryItem[] = [
     unitId: "unit-kg",
     minThreshold: 5,
     assignedEmployeeIds: ["user-amir"],
+    statusOverride: null,
     createdAt: "2026-01-04T09:00:00.000Z",
   },
   {
@@ -117,6 +118,7 @@ const items: InventoryItem[] = [
     unitId: "unit-l",
     minThreshold: 3,
     assignedEmployeeIds: ["user-amir"],
+    statusOverride: null,
     createdAt: "2026-01-04T09:00:00.000Z",
   },
 ];
@@ -139,11 +141,13 @@ const multiItemReport: Report = {
         { quantity: 9, recordedAt: "2026-07-12T11:30:00.000Z" },
         { quantity: 20, recordedAt: "2026-07-12T16:45:00.000Z" },
       ],
+      statusPings: [],
       note: "",
     },
     {
       itemId: "item-yogurt",
       snapshots: [],
+      statusPings: [],
       note: "Leaking carton, moved to a tray.",
     },
   ],
@@ -170,6 +174,7 @@ const orphanedReport: Report = {
     {
       itemId: "item-removed",
       snapshots: [{ quantity: 4, recordedAt: "2026-07-14T05:00:00.000Z" }],
+      statusPings: [],
       note: "Crate was already open.",
     },
   ],
@@ -328,6 +333,7 @@ describe("buildReportExportHtml", () => {
         unitId: "unit-kg",
         minThreshold: 1,
         assignedEmployeeIds: [],
+        statusOverride: null,
         createdAt: "2026-01-04T09:00:00.000Z",
       },
     ];
@@ -343,6 +349,7 @@ describe("buildReportExportHtml", () => {
         {
           itemId: "item-tricky",
           snapshots: [{ quantity: 4, recordedAt: "2026-07-15T05:00:00.000Z" }],
+          statusPings: [],
           note: 'Spilled <script>alert(1)</script> & "cracked" crate',
         },
       ],

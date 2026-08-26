@@ -54,6 +54,30 @@ export const sampleUsers: AppUser[] = [
     name: "Wasit Khalil",
     email: "wasitabbasi222@gmail.com",
     role: "employee",
+  },
+  {
+    id: "user-10",
+    name: "Khalid",
+    email: "yahyamd646815+khalidemployee@gmail.com",
+    role: "employee",
+  },
+  {
+    id: "user-11",
+    name: "Irfan",
+    email: "yahyamd646815+irfanemployee@gmail.com",
+    role: "employee",
+  },
+  {
+    id: "user-12",
+    name: "Ilyas",
+    email: "yahyamd646815+ilyasemployee@gmail.com",
+    role: "employee",
+  },
+  {
+    id: "user-13",
+    name: "Imran",
+    email: "yahyamd646815+imranemployee@gmail.com",
+    role: "employee",
   }
 ];
 // I (Yahya) removed some sample users to keep the code concise. You can add more users as needed.

@@ -58,5 +58,9 @@ export function useReportCleanup(isSignedIn: boolean) {
           `[useReportCleanup] Deleted ${data?.length ?? 0} report(s) older than ${cutoff}.`,
         );
       });
-  }, [sessionId, role, isSignedIn, supabase]);
+    // supabase intentionally omitted — its identity is now stable per
+    // component instance (see useSupabaseClient), and the sessionId ref
+    // guard above is what actually governs re-runs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, role, isSignedIn]);
 }

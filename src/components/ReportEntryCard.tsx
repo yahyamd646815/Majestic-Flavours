@@ -2,9 +2,18 @@ import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
+import { StockStatusBadge } from "@/components/StockStatusBadge";
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { getCategoryName, getUnitLabel } from "@/lib/inventoryLabels";
 import { formatSnapshotTime } from "@/lib/reports";
+import {
+  getEffectiveStatus,
+  STOCK_STATUS_LABELS,
+  STOCK_STATUS_ORDER,
+  STOCK_STATUS_PING_CLASSES,
+  STOCK_STATUS_PING_INACTIVE_CLASSES,
+  type StockStatus,
+} from "@/lib/stockStatus";
 import type { Category, InventoryItem, ReportItemSnapshot, Unit } from "@/types/inventory";
 
 type ReportEntryCardProps = {
@@ -20,8 +29,12 @@ type ReportEntryCardProps = {
   note: string;
   /** Today's report is locked — nothing on this card can be changed. */
   isLocked: boolean;
+  /** The status pinged in this draft, if any. Undefined means nothing has
+   * been pinged since the last submit. */
+  statusPing?: StockStatus;
   onQuantityChange: (nextQuantity: number) => void;
   onNoteChange: (note: string) => void;
+  onStatusPing: (status: StockStatus) => void;
 };
 
 /** One item being reported: stepper, recorded history and an optional note. */
@@ -33,8 +46,10 @@ export function ReportEntryCard({
   snapshots,
   note,
   isLocked,
+  statusPing,
   onQuantityChange,
   onNoteChange,
+  onStatusPing,
 }: ReportEntryCardProps) {
   // Collapsed by default — a list can run to 200+ items, and most of them
   // never get a note.
@@ -43,21 +58,21 @@ export function ReportEntryCard({
   const categoryName = getCategoryName(categories, item.categoryId);
   const unitLabel = getUnitLabel(units, item.unitId);
 
-  const isOutOfStock = displayQuantity === 0;
-  const isLowStock = !isOutOfStock && displayQuantity <= item.minThreshold;
   const hasPendingChange = displayQuantity !== item.currentQuantity;
 
-  const badgeClass = isOutOfStock
-    ? "status-badge status-badge--out-of-stock"
-    : isLowStock
-      ? "status-badge status-badge--low-stock"
-      : "status-badge status-badge--in-stock";
-  const badgeTextClass = isOutOfStock
-    ? "status-badge__text--out-of-stock"
-    : isLowStock
-      ? "status-badge__text--low-stock"
-      : "status-badge__text--in-stock";
-  const statusLabel = isOutOfStock ? "Out of Stock" : isLowStock ? "Low Stock" : "In Stock";
+  // Previews what submitting this card would actually produce: a ping wins,
+  // and otherwise a pending quantity change clears any existing override —
+  // the same rule `updateItem` applies when the report is sent.
+  const pendingOverride = statusPing ?? (hasPendingChange ? null : item.statusOverride);
+  const status = getEffectiveStatus({
+    currentQuantity: displayQuantity,
+    minThreshold: item.minThreshold,
+    statusOverride: pendingOverride,
+  });
+  // Guards the decrement button only, so it stays tied to the real quantity:
+  // an item pinged "Out of Stock" while 50 units are still counted must not
+  // lose its minus button.
+  const isAtZero = displayQuantity === 0;
 
   const lastSnapshot = snapshots[snapshots.length - 1];
 
@@ -68,20 +83,18 @@ export function ReportEntryCard({
           <Text className="font-inter-semibold text-base text-text-primary">{item.name}</Text>
           <Text className="font-inter text-xs text-text-secondary">{categoryName}</Text>
         </View>
-        <View className={badgeClass}>
-          <Text className={badgeTextClass}>{statusLabel}</Text>
-        </View>
+        <StockStatusBadge status={status} isOverridden={pendingOverride !== null} />
       </View>
 
       <View className="flex-row items-center justify-between rounded-lg border border-border px-3 py-2">
         <TouchableOpacity
           className={
-            isOutOfStock || isLocked
+            isAtZero || isLocked
               ? "h-11 w-11 items-center justify-center rounded-full bg-cream opacity-40"
               : "h-11 w-11 items-center justify-center rounded-full bg-cream"
           }
           activeOpacity={0.8}
-          disabled={isOutOfStock || isLocked}
+          disabled={isAtZero || isLocked}
           onPress={() => onQuantityChange(displayQuantity - 1)}
           accessibilityRole="button"
           accessibilityLabel={`Remove one ${unitLabel} of ${item.name}`}
@@ -114,6 +127,38 @@ export function ReportEntryCard({
           Not reported yet: {item.currentQuantity} → {displayQuantity} {unitLabel}
         </Text>
       ) : null}
+
+      <View className="gap-1.5">
+        <Text className="font-inter-medium text-xs text-text-secondary">Stock status</Text>
+        <View className={isLocked ? "flex-row gap-2 opacity-50" : "flex-row gap-2"}>
+          {STOCK_STATUS_ORDER.map((pingStatus) => {
+            const isActive = pingStatus === status;
+            const classes = isActive
+              ? STOCK_STATUS_PING_CLASSES[pingStatus]
+              : STOCK_STATUS_PING_INACTIVE_CLASSES;
+
+            return (
+              <TouchableOpacity
+                key={pingStatus}
+                className={classes.button}
+                activeOpacity={isActive ? 1 : 0.8}
+                disabled={isLocked}
+                // Tapping the already-active status is a no-op: there is no
+                // "clear the ping" gesture — only changing the quantity or
+                // pinging a different status moves it.
+                onPress={() => {
+                  if (!isActive) onStatusPing(pingStatus);
+                }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: isActive }}
+                accessibilityLabel={`Mark ${item.name} as ${STOCK_STATUS_LABELS[pingStatus]}`}
+              >
+                <Text className={classes.text}>{STOCK_STATUS_LABELS[pingStatus]}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
 
       {snapshots.length > 0 ? (
         <View className="gap-0.5">

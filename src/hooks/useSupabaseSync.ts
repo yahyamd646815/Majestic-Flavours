@@ -27,10 +27,20 @@ export function useSupabaseSync(isSignedIn: boolean) {
 
   useEffect(() => {
     if (!isSignedIn) return;
+    // TEMPORARY-START: confirms this effect fires once per session, not
+    // repeatedly. Safe to delete once Yahya confirms exactly one log line
+    // over 2-3 minutes of real use.
+    console.log("[useSupabaseSync] fetch effect fired");
+    // TEMPORARY-END
     void fetchInventory(supabase);
     void fetchUnits(supabase);
     void fetchReports(supabase);
-  }, [isSignedIn, supabase, fetchInventory, fetchUnits, fetchReports]);
+    // supabase is intentionally omitted: its identity is now stable per
+    // component instance (see useSupabaseClient), and re-running this effect
+    // should be driven only by sign-in state, not by an incidental client
+    // reference change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSignedIn, fetchInventory, fetchUnits, fetchReports]);
 
   // Read as primitives so the effect below is keyed on the values that
   // actually matter — Clerk's `user` object identity changes more often than
@@ -48,5 +58,7 @@ export function useSupabaseSync(isSignedIn: boolean) {
     void syncSelf(supabase, { clerkUserId, name, email }).then(() =>
       fetchAppUsers(supabase),
     );
-  }, [isSignedIn, clerkUserId, name, email, supabase, syncSelf, fetchAppUsers]);
+    // supabase intentionally omitted — see note in the effect above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSignedIn, clerkUserId, name, email, syncSelf, fetchAppUsers]);
 }

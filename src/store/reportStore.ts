@@ -3,6 +3,7 @@ import { create } from "zustand";
 
 import { generateId } from "@/lib/id";
 import { getTodayIsoDate } from "@/lib/reports";
+import type { StockStatus } from "@/lib/stockStatus";
 import type { Report, ReportItemEntry } from "@/types/inventory";
 
 function mapDbReportToReport(row: Record<string, unknown>): Report {
@@ -21,6 +22,12 @@ function mapDbReportToReport(row: Record<string, unknown>): Report {
           recordedAt: snapshotRow.recorded_at as string,
         }))
         .sort((a, b) => a.recordedAt.localeCompare(b.recordedAt)),
+      statusPings: ((entryRow.report_item_status_pings as Record<string, unknown>[] | null) ?? [])
+        .map((row) => ({
+          status: row.status as StockStatus,
+          recordedAt: row.recorded_at as string,
+        }))
+        .sort((a, b) => a.recordedAt.localeCompare(b.recordedAt)),
     };
   });
 
@@ -34,12 +41,14 @@ function mapDbReportToReport(row: Record<string, unknown>): Report {
   };
 }
 
-const REPORT_SELECT = "*, report_item_entries(*, report_item_snapshots(*))";
+const REPORT_SELECT =
+  "*, report_item_entries(*, report_item_snapshots(*), report_item_status_pings(*))";
 
 export type ItemSubmission = {
   itemId: string;
   newSnapshotQuantity?: number;
   note?: string;
+  statusPing?: StockStatus;
 };
 
 export type SubmitReportResult = { reportId: string; failedItemIds: string[] } | null;
@@ -143,6 +152,15 @@ export const useReportStore = create<ReportState>()((set, get) => ({
           quantity: submission.newSnapshotQuantity,
         });
         if (snapshotError) failedItemIds.push(submission.itemId);
+      }
+
+      if (submission.statusPing !== undefined) {
+        const { error: pingError } = await supabase.from("report_item_status_pings").insert({
+          id: generateId("status-ping"),
+          report_item_entry_id: entryData.id,
+          status: submission.statusPing,
+        });
+        if (pingError) failedItemIds.push(submission.itemId);
       }
     }
 

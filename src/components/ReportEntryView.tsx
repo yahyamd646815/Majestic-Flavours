@@ -10,6 +10,7 @@ import { SearchBar } from "@/components/SearchBar";
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { useDraftReport } from "@/context/DraftReportContext";
 import { getTodayIsoDate, isReportLocked } from "@/lib/reports";
+import type { StockStatus } from "@/lib/stockStatus";
 import { useSupabaseClient } from "@/lib/supabase";
 import { useAppUsersStore } from "@/store/appUsersStore";
 import { useInventoryStore } from "@/store/inventoryStore";
@@ -36,8 +37,15 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
     state.getReportForReporterAndDate(reporterId, todayIsoDate),
   );
 
-  const { draftQuantities, draftNotes, setDraftQuantity, setDraftNote, clearDrafts } =
-    useDraftReport();
+  const {
+    draftQuantities,
+    draftNotes,
+    draftStatusPings,
+    setDraftQuantity,
+    setDraftNote,
+    setDraftStatusPing,
+    clearDrafts,
+  } = useDraftReport();
 
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -84,8 +92,13 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
   );
 
   const pendingCount = useMemo(
-    () => new Set([...Object.keys(draftQuantities), ...Object.keys(draftNotes)]).size,
-    [draftQuantities, draftNotes],
+    () =>
+      new Set([
+        ...Object.keys(draftQuantities),
+        ...Object.keys(draftNotes),
+        ...Object.keys(draftStatusPings),
+      ]).size,
+    [draftQuantities, draftNotes, draftStatusPings],
   );
 
   function getDisplayQuantity(item: InventoryItem): number {
@@ -112,12 +125,18 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
           todaysReport?.itemEntries.find((e) => e.itemId === item.id)?.note ?? "";
         const noteChanged = draftNote !== undefined && draftNote !== existingNote;
 
-        if (!quantityChanged && !noteChanged) continue;
+        // A ping on its own is a complete report for this item — no quantity
+        // change and no note required.
+        const draftPing = draftStatusPings[item.id];
+        const pingChanged = draftPing !== undefined;
+
+        if (!quantityChanged && !noteChanged && !pingChanged) continue;
 
         itemSubmissions.push({
           itemId: item.id,
           ...(quantityChanged ? { newSnapshotQuantity: draftQuantity } : {}),
           ...(noteChanged ? { note: draftNote } : {}),
+          ...(pingChanged ? { statusPing: draftPing } : {}),
         });
       }
 
@@ -144,15 +163,29 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
         has_day_note: dayContent.trim().length > 0,
       });
 
-      const quantityUpdates = itemSubmissions.flatMap((submission) =>
-        submission.newSnapshotQuantity === undefined
-          ? []
-          : [{ itemId: submission.itemId, quantity: submission.newSnapshotQuantity }],
-      );
+      // Quantity and status are merged into a single `updateItem` call per
+      // item. Sent as two separate writes, an item that had both changed in
+      // one submission would have the ping silently overwritten by the
+      // quantity change's automatic override-clear (see `updateItem`).
+      type ItemWriteback = { currentQuantity?: number; statusOverride?: StockStatus };
+      const writebacks = new Map<string, ItemWriteback>();
+
+      for (const submission of itemSubmissions) {
+        if (submission.newSnapshotQuantity === undefined && submission.statusPing === undefined)
+          continue;
+        writebacks.set(submission.itemId, {
+          ...(submission.newSnapshotQuantity !== undefined
+            ? { currentQuantity: submission.newSnapshotQuantity }
+            : {}),
+          ...(submission.statusPing !== undefined
+            ? { statusOverride: submission.statusPing }
+            : {}),
+        });
+      }
 
       const writeResults = await Promise.all(
-        quantityUpdates.map((update) =>
-          updateItem(supabase, update.itemId, { currentQuantity: update.quantity }),
+        Array.from(writebacks.entries()).map(([itemId, changes]) =>
+          updateItem(supabase, itemId, changes),
         ),
       );
 
@@ -223,8 +256,10 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
               snapshots={entry?.snapshots ?? []}
               note={draftNotes[item.id] ?? entry?.note ?? ""}
               isLocked={isLocked}
+              statusPing={draftStatusPings[item.id]}
               onQuantityChange={(nextQuantity) => handleQuantityChange(item, nextQuantity)}
               onNoteChange={(note) => setDraftNote(item.id, note)}
+              onStatusPing={(status) => setDraftStatusPing(item.id, status)}
             />
           );
         }}

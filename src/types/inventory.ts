@@ -1,3 +1,4 @@
+import type { StockStatus } from "@/lib/stockStatus";
 import type { Role } from "@/types/role";
 
 export type Category = {
@@ -21,6 +22,11 @@ export type InventoryItem = {
   unitId: string;
   minThreshold: number;
   assignedEmployeeIds: string[];
+  /** A status pinged manually from a report. `null` — the normal case — means
+   * status is purely quantity-derived. Never set from the item form; only a
+   * report ping writes it, and a quantity change clears it. Always read it
+   * through `getEffectiveStatus` (@/lib/stockStatus), never directly. */
+  statusOverride: StockStatus | null;
   createdAt: string;
 };
 
@@ -34,6 +40,7 @@ export type ReportItemSnapshot = {
 export type ReportItemEntry = {
   itemId: string;
   snapshots: ReportItemSnapshot[];
+  statusPings: { status: StockStatus; recordedAt: string }[];
   note: string; // "" = no note. Independent of quantity.
 };
 

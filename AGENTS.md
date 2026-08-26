@@ -133,8 +133,6 @@ Never expose secret keys here. Clerk itself has no dedicated `lib/clerk.ts` wrap
 
 ## Role-Based Access
 
-There are three roles managed through Clerk, stored lowercase in `publicMetadata.role` (`"admin"`, `"manager"`, `"employee"`):
-
 There are three roles managed through Clerk:
 - Admin — full access to all screens and all functions including user management, item deletion, and settings
 - Manager — can add items, view all inventory and reports, export reports, but cannot delete items or manage users
@@ -408,6 +406,20 @@ Jest + `jest-expo` were added after v1 shipped. Tests live in `src/<area>/__test
 Not every module has tests yet — coverage is added deliberately, module by module, not retrofitted everywhere at once. When writing tests: cover pure logic thoroughly, and for thin wrappers around native I/O (file system, sharing, print), mock the underlying library and verify it's called with correctly-shaped arguments rather than trying to verify real file writes. If you find an actual bug in the code while writing tests against it, stop and flag it — don't silently fix it inline as part of the testing task.
 
 ---
+
+## Temporary Code
+
+Some things genuinely can't be verified by Claude Code alone — anything needing a physical device, a real network condition, or watching something happen over real time (e.g. confirming a `console.log` fires once, not repeatedly, over a few minutes of real use) has to be checked by Yahya, not asserted as done.
+
+When a prompt asks for code like this — meant to be checked once and then deleted, never part of the shipped feature — mark it clearly, so it can never be mistaken for permanent code and is trivially greppable across the whole repo:
+
+```ts
+// TEMPORARY-START: <why this exists, and what confirms it's safe to delete>
+console.log("[useSupabaseSync] fetch effect fired");
+// TEMPORARY-END
+```
+
+Never leave temporary code unmarked. If it can be fully verified without a device or a real-world condition, remove it before reporting the task done rather than leaving it in for no reason. If it genuinely can't be verified without Yahya's own device or usage, say so explicitly in the summary — which files, and what result confirms it's safe to remove.
 
 ## Linting and Validation
 

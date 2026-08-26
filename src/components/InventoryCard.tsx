@@ -1,9 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Text, TouchableOpacity, View } from "react-native";
 
+import { StockStatusBadge } from "@/components/StockStatusBadge";
 import { colors } from "@/constants/theme";
 import { getAssignedNames } from "@/lib/getAssignedNames";
 import { getCategoryName, getUnitLabel } from "@/lib/inventoryLabels";
+import { getEffectiveStatus } from "@/lib/stockStatus";
 import { useAppUsersStore } from "@/store/appUsersStore";
 import type { Category, InventoryItem, Unit } from "@/types/inventory";
 
@@ -38,20 +40,7 @@ export function InventoryCard({
 }: InventoryCardProps) {
   const appUsers = useAppUsersStore((state) => state.users);
 
-  const isOutOfStock = item.currentQuantity === 0;
-  const isLowStock = !isOutOfStock && item.currentQuantity <= item.minThreshold;
-
-  const badgeClass = isOutOfStock
-    ? "status-badge status-badge--out-of-stock"
-    : isLowStock
-      ? "status-badge status-badge--low-stock"
-      : "status-badge status-badge--in-stock";
-  const badgeTextClass = isOutOfStock
-    ? "status-badge__text--out-of-stock"
-    : isLowStock
-      ? "status-badge__text--low-stock"
-      : "status-badge__text--in-stock";
-  const statusLabel = isOutOfStock ? "Out of Stock" : isLowStock ? "Low Stock" : "In Stock";
+  const status = getEffectiveStatus(item);
 
   const assignedNames = getAssignedNames(item.assignedEmployeeIds, appUsers);
   const categoryName = getCategoryName(categories, item.categoryId);
@@ -72,9 +61,7 @@ export function InventoryCard({
           <Text className="font-inter-semibold text-base text-text-primary">{item.name}</Text>
           <Text className="font-inter text-xs text-text-secondary">{categoryName}</Text>
         </View>
-        <View className={badgeClass}>
-          <Text className={badgeTextClass}>{statusLabel}</Text>
-        </View>
+        <StockStatusBadge status={status} isOverridden={item.statusOverride !== null} />
       </View>
 
       <Text className="font-inter text-sm text-text-primary">

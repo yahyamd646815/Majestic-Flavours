@@ -9,7 +9,9 @@ import { useInventoryStore } from "@/store/inventoryStore";
 import { useUnitsStore } from "@/store/unitsStore";
 import type { InventoryItem } from "@/types/inventory";
 
-export type ItemFormValues = Omit<InventoryItem, "id" | "createdAt">;
+/** `statusOverride` is excluded deliberately: there is no ping control in the
+ * item form, and nothing but a report ping may set it. */
+export type ItemFormValues = Omit<InventoryItem, "id" | "createdAt" | "statusOverride">;
 
 type ItemFormModalProps = {
   visible: boolean;

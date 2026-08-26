@@ -101,6 +101,45 @@
   @apply font-inter-semibold text-xs text-out-of-stock;
 }
 
+/* Status-ping buttons (report entry). The base deliberately sets no border
+   colour or background — each modifier owns both — so a selected button never
+   depends on utility ordering to beat the unselected look. */
+@utility status-ping {
+  @apply flex-1 items-center justify-center rounded-lg border px-2 py-3;
+}
+
+@utility status-ping--inactive {
+  @apply border-border bg-white;
+}
+
+@utility status-ping--in-stock {
+  @apply border-in-stock bg-in-stock/10;
+}
+
+@utility status-ping--low-stock {
+  @apply border-low-stock bg-low-stock/10;
+}
+
+@utility status-ping--out-of-stock {
+  @apply border-out-of-stock bg-out-of-stock/10;
+}
+
+@utility status-ping__text--inactive {
+  @apply font-inter-medium text-xs text-text-secondary;
+}
+
+@utility status-ping__text--in-stock {
+  @apply font-inter-semibold text-xs text-in-stock;
+}
+
+@utility status-ping__text--low-stock {
+  @apply font-inter-semibold text-xs text-low-stock;
+}
+
+@utility status-ping__text--out-of-stock {
+  @apply font-inter-semibold text-xs text-out-of-stock;
+}
+
 @utility btn-primary {
   @apply w-full items-center rounded-lg bg-gold px-4 py-3;
 }

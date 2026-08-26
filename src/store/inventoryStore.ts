@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { create } from "zustand";
 
 import { generateId, slugify } from "@/lib/id";
+import { getEffectiveStatus, type StockStatus } from "@/lib/stockStatus";
 import type { Category, InventoryItem } from "@/types/inventory";
 
 /** Supabase returns snake_case rows whose shape isn't statically known, so the
@@ -15,6 +16,7 @@ function mapDbItemToItem(row: Record<string, unknown>): InventoryItem {
     unitId: row.unit_id as string,
     minThreshold: row.min_threshold as number,
     assignedEmployeeIds: (row.assigned_employee_ids as string[]) ?? [],
+    statusOverride: (row.status_override as StockStatus | null) ?? null,
     createdAt: row.created_at as string,
   };
 }
@@ -44,9 +46,12 @@ type InventoryState = {
   clearEmployeeIds: () => void;
   getLowStockItems: () => InventoryItem[];
   fetchAll: (supabase: SupabaseClient) => Promise<void>;
+  /** `statusOverride` is excluded for the same reason `assignedEmployeeIds`
+   * is excluded from `updateItem`: nothing outside a report ping may set it.
+   * A new row simply gets `NULL` from the database. */
   addItem: (
     supabase: SupabaseClient,
-    item: Omit<InventoryItem, "id" | "createdAt">,
+    item: Omit<InventoryItem, "id" | "createdAt" | "statusOverride">,
   ) => Promise<boolean>;
   updateItem: (
     supabase: SupabaseClient,
@@ -93,7 +98,7 @@ export const useInventoryStore = create<InventoryState>()((set, get) => ({
     }),
   clearEmployeeIds: () => set({ selectedEmployeeIds: new Set() }),
   getLowStockItems: () =>
-    get().items.filter((item) => item.currentQuantity <= item.minThreshold),
+    get().items.filter((item) => getEffectiveStatus(item) !== "in_stock"),
 
   fetchAll: async (supabase) => {
     set({ isLoading: true, error: null });
@@ -151,6 +156,22 @@ export const useInventoryStore = create<InventoryState>()((set, get) => ({
       dbUpdates.current_quantity = updates.currentQuantity;
     if (updates.unitId !== undefined) dbUpdates.unit_id = updates.unitId;
     if (updates.minThreshold !== undefined) dbUpdates.min_threshold = updates.minThreshold;
+
+    // A quantity change clears a manual override — UNLESS this same call is
+    // also explicitly setting a new one, in which case the explicit value
+    // wins. Folding both into one `status_override` decision (rather than
+    // writing the clear and the ping as two sequential updates) is what makes
+    // a same-submission "changed the quantity AND pinged a status" survive:
+    // as two writes, whichever landed second would silently win. This
+    // composes correctly for all three real cases — quantity-only clears it,
+    // ping-only sets it without touching quantity, and a combined
+    // quantity+ping update keeps the pinged value.
+    const effectiveStatusOverride =
+      updates.currentQuantity !== undefined && updates.statusOverride === undefined
+        ? null
+        : updates.statusOverride;
+    if (effectiveStatusOverride !== undefined)
+      dbUpdates.status_override = effectiveStatusOverride;
 
     const { data, error } = await supabase
       .from("inventory_items")
