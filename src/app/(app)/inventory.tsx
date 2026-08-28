@@ -444,7 +444,7 @@ export default function Inventory() {
       ) : null}
 
       <ItemFormModal
-        key={formSession}
+        key={`form-${formSession}`}
         visible={isAddOpen || editItem !== null}
         item={editItem ?? undefined}
         onClose={closeForm}
@@ -452,7 +452,7 @@ export default function Inventory() {
       />
 
       <BulkAssignModal
-        key={assignSession}
+        key={`assign-${assignSession}`}
         visible={isAssignOpen}
         itemCount={selectedCount}
         isAssigning={isAssigning}

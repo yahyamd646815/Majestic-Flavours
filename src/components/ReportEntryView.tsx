@@ -9,6 +9,7 @@ import { ReportSubmittedModal } from "@/components/ReportSubmittedModal";
 import { SearchBar } from "@/components/SearchBar";
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { useDraftReport } from "@/context/DraftReportContext";
+import { generateId } from "@/lib/id";
 import { getTodayIsoDate, isReportLocked } from "@/lib/reports";
 import type { StockStatus } from "@/lib/stockStatus";
 import { useSupabaseClient } from "@/lib/supabase";
@@ -52,6 +53,8 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [dayContent, setDayContent] = useState(todaysReport?.content ?? "");
+
+  const pendingSubmissionIdRef = useRef<string | null>(null);
 
   const seededReportId = useRef(todaysReport?.id);
   useEffect(() => {
@@ -113,6 +116,11 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
     if (isSubmitting) return;
     setIsSubmitting(true);
     try {
+      if (pendingSubmissionIdRef.current === null) {
+        pendingSubmissionIdRef.current = generateId("submission");
+      }
+      const submissionId = pendingSubmissionIdRef.current;
+
       const itemSubmissions: ItemSubmission[] = [];
 
       for (const item of items) {
@@ -146,6 +154,7 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
         todayIsoDate,
         dayContent.trim(),
         itemSubmissions,
+        submissionId,
       );
       if (result === null) {
         Alert.alert("Report could not be saved", "Check your connection and try again.");
@@ -196,6 +205,9 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
         // Drafts are kept here too — the alert tells the person to retry the
         // failed items, so wiping their entered values first would make
         // that impossible without re-typing everything.
+        // pendingSubmissionIdRef is deliberately NOT cleared here — a retry
+        // must reuse the same id so the snapshot/ping upserts land on the
+        // same rows instead of creating duplicates.
         Alert.alert(
           "Report saved with some issues",
           "Some items could not be fully saved. Check your connection and try those items again.",
@@ -203,6 +215,7 @@ export function ReportEntryView({ reporterId, items }: ReportEntryViewProps) {
         return;
       }
 
+      pendingSubmissionIdRef.current = null;
       clearDrafts();
       setShowConfirmation(true);
     } finally {

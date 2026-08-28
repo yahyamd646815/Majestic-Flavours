@@ -64,6 +64,7 @@ type ReportState = {
     date: string,
     content: string,
     itemSubmissions: ItemSubmission[],
+    submissionId: string,
   ) => Promise<SubmitReportResult>;
   getReportForReporterAndDate: (reporterId: string, date: string) => Report | undefined;
   getReportsForItem: (itemId: string) => Report[];
@@ -94,7 +95,7 @@ export const useReportStore = create<ReportState>()((set, get) => ({
     });
   },
 
-  submitReport: async (supabase, reporterId, date, content, itemSubmissions) => {
+  submitReport: async (supabase, reporterId, date, content, itemSubmissions, submissionId) => {
     if (date !== getTodayIsoDate()) {
       console.warn("[reportStore] Refusing to submit a report for a non-today date:", date);
       return null;
@@ -146,20 +147,26 @@ export const useReportStore = create<ReportState>()((set, get) => ({
       }
 
       if (submission.newSnapshotQuantity !== undefined) {
-        const { error: snapshotError } = await supabase.from("report_item_snapshots").insert({
-          id: generateId("snapshot"),
-          report_item_entry_id: entryData.id,
-          quantity: submission.newSnapshotQuantity,
-        });
+        const { error: snapshotError } = await supabase.from("report_item_snapshots").upsert(
+          {
+            id: `snapshot-${submissionId}-${submission.itemId}`,
+            report_item_entry_id: entryData.id,
+            quantity: submission.newSnapshotQuantity,
+          },
+          { onConflict: "id" },
+        );
         if (snapshotError) failedItemIds.push(submission.itemId);
       }
 
       if (submission.statusPing !== undefined) {
-        const { error: pingError } = await supabase.from("report_item_status_pings").insert({
-          id: generateId("status-ping"),
-          report_item_entry_id: entryData.id,
-          status: submission.statusPing,
-        });
+        const { error: pingError } = await supabase.from("report_item_status_pings").upsert(
+          {
+            id: `status-ping-${submissionId}-${submission.itemId}`,
+            report_item_entry_id: entryData.id,
+            status: submission.statusPing,
+          },
+          { onConflict: "id" },
+        );
         if (pingError) failedItemIds.push(submission.itemId);
       }
     }

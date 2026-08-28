@@ -6,6 +6,7 @@ import { useEffect, useRef } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
 import { StockStatusBadge } from "@/components/StockStatusBadge";
@@ -14,10 +15,23 @@ import { getAssignedNames } from "@/lib/getAssignedNames";
 import { getCategoryName, getUnitLabel } from "@/lib/inventoryLabels";
 import { getEffectiveStatus } from "@/lib/stockStatus";
 import { useSupabaseClient } from "@/lib/supabase";
+import type { SyncedUser } from "@/store/appUsersStore";
 import { useAppUsersStore } from "@/store/appUsersStore";
 import { useInventoryStore } from "@/store/inventoryStore";
 import { useUnitsStore } from "@/store/unitsStore";
+import type { Category, InventoryItem, Unit } from "@/types/inventory";
 import { parseRole } from "@/types/role";
+
+/** Pinged items (manual override) first, quantity-derived items after —
+ * stable-sorted so relative arrival order within each group is untouched.
+ * Dashboard-only: Inventory and Reports keep their own sort logic. */
+function sortPingedFirst(items: InventoryItem[]): InventoryItem[] {
+  return [...items].sort((a, b) => {
+    const aWeight = a.statusOverride !== null ? 0 : 1;
+    const bWeight = b.statusOverride !== null ? 0 : 1;
+    return aWeight - bWeight;
+  });
+}
 
 const styles = StyleSheet.create({
   scrollContent: {
@@ -78,6 +92,12 @@ export default function Dashboard() {
   const lowStockCount = items.filter((item) => getEffectiveStatus(item) === "low_stock").length;
 
   const alertItems = getLowStockItems();
+  const outOfStockItems = sortPingedFirst(
+    alertItems.filter((item) => getEffectiveStatus(item) === "out_of_stock"),
+  );
+  const lowStockAlertItems = sortPingedFirst(
+    alertItems.filter((item) => getEffectiveStatus(item) === "low_stock"),
+  );
 
   const combinedError = error ?? unitsError;
   const isEmptyAndLoading = (isLoading || unitsLoading) && items.length === 0;
@@ -119,58 +139,94 @@ export default function Dashboard() {
               </View>
             </View>
 
-            <View>
-              <View className="section-header rounded-t-xl">
-                <Text className="section-header__title">Low Stock Alerts</Text>
+            {alertItems.length === 0 ? (
+              <View>
+                <View className="section-header rounded-t-xl">
+                  <Text className="section-header__title">Low Stock Alerts</Text>
+                </View>
+                <View className="items-center gap-2 rounded-b-xl bg-cream p-3 py-8">
+                  <Ionicons name="checkmark-circle" size={40} color={colors.inStock} />
+                  <Text className="font-inter-medium text-sm text-text-secondary">
+                    All items are well stocked.
+                  </Text>
+                </View>
               </View>
-
-              <View className="gap-3 rounded-b-xl bg-cream p-3">
-                {alertItems.length === 0 ? (
-                  <View className="items-center gap-2 py-8">
-                    <Ionicons name="checkmark-circle" size={40} color={colors.inStock} />
-                    <Text className="font-inter-medium text-sm text-text-secondary">
-                      All items are well stocked.
+            ) : (
+              <View className="gap-4">
+                <CollapsibleSection title="Out of Stock" count={outOfStockItems.length}>
+                  {outOfStockItems.length === 0 ? (
+                    <Text className="py-2 text-center font-inter text-xs text-text-secondary">
+                      No items out of stock.
                     </Text>
-                  </View>
-                ) : (
-                  alertItems.map((item) => {
-                    const status = getEffectiveStatus(item);
-                    const assignedNames = getAssignedNames(item.assignedEmployeeIds, appUsers);
+                  ) : (
+                    outOfStockItems.map((item) => (
+                      <AlertItemCard
+                        key={item.id}
+                        item={item}
+                        categories={categories}
+                        units={units}
+                        appUsers={appUsers}
+                      />
+                    ))
+                  )}
+                </CollapsibleSection>
 
-                    return (
-                      <View key={item.id} className="card gap-2">
-                        <View className="flex-row items-start justify-between gap-2">
-                          <View className="flex-1">
-                            <Text className="font-inter-semibold text-base text-text-primary">
-                              {item.name}
-                            </Text>
-                            <Text className="font-inter text-xs text-text-secondary">
-                              {getCategoryName(categories, item.categoryId)}
-                            </Text>
-                          </View>
-                          <StockStatusBadge
-                            status={status}
-                            isOverridden={item.statusOverride !== null}
-                          />
-                        </View>
-
-                        <Text className="font-inter text-sm text-text-primary">
-                          {item.currentQuantity} {getUnitLabel(units, item.unitId)} remaining
-                        </Text>
-
-                        <Text className="font-inter text-xs text-text-secondary">
-                          Assigned:{" "}
-                          {assignedNames.length > 0 ? assignedNames.join(", ") : "Unassigned"}
-                        </Text>
-                      </View>
-                    );
-                  })
-                )}
+                <CollapsibleSection title="Low Stock" count={lowStockAlertItems.length}>
+                  {lowStockAlertItems.length === 0 ? (
+                    <Text className="py-2 text-center font-inter text-xs text-text-secondary">
+                      No items low on stock.
+                    </Text>
+                  ) : (
+                    lowStockAlertItems.map((item) => (
+                      <AlertItemCard
+                        key={item.id}
+                        item={item}
+                        categories={categories}
+                        units={units}
+                        appUsers={appUsers}
+                      />
+                    ))
+                  )}
+                </CollapsibleSection>
               </View>
-            </View>
+            )}
           </View>
         </ScrollView>
       )}
     </SafeAreaView>
+  );
+}
+
+type AlertItemCardProps = {
+  item: InventoryItem;
+  categories: Category[];
+  units: Unit[];
+  appUsers: SyncedUser[];
+};
+
+function AlertItemCard({ item, categories, units, appUsers }: AlertItemCardProps) {
+  const status = getEffectiveStatus(item);
+  const assignedNames = getAssignedNames(item.assignedEmployeeIds, appUsers);
+
+  return (
+    <View className="card gap-2">
+      <View className="flex-row items-start justify-between gap-2">
+        <View className="flex-1">
+          <Text className="font-inter-semibold text-base text-text-primary">{item.name}</Text>
+          <Text className="font-inter text-xs text-text-secondary">
+            {getCategoryName(categories, item.categoryId)}
+          </Text>
+        </View>
+        <StockStatusBadge status={status} isOverridden={item.statusOverride !== null} />
+      </View>
+
+      <Text className="font-inter text-sm text-text-primary">
+        {item.currentQuantity} {getUnitLabel(units, item.unitId)} remaining
+      </Text>
+
+      <Text className="font-inter text-xs text-text-secondary">
+        Assigned: {assignedNames.length > 0 ? assignedNames.join(", ") : "Unassigned"}
+      </Text>
+    </View>
   );
 }

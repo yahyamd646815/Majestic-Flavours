@@ -48,7 +48,7 @@ export function ManagerReportsView({ footer, onSelfReport }: ManagerReportsViewP
     (state) => state.getReportForReporterAndDate,
   );
 
-  const [dateFilter, setDateFilter] = useState<ReportDateFilter>("all");
+  const [dateFilter, setDateFilter] = useState<ReportDateFilter>("today");
   const [reporterIds, setReporterIds] = useState<Set<string>>(new Set());
   const [categoryIds, setCategoryIds] = useState<Set<string>>(new Set());
   const [detailReportId, setDetailReportId] = useState<string | null>(null);
