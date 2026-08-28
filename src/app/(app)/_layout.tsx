@@ -75,10 +75,20 @@ export default function AppLayout() {
           }}
         />
         <Tabs.Screen
+          name="manage"
+          options={{
+            title: "Manage",
+            href: canManage ? undefined : null,
+            tabBarIcon: ({ color, size, focused }) => (
+              <Ionicons name={focused ? "apps" : "apps-outline"} color={color} size={size} />
+            ),
+          }}
+        />
+        <Tabs.Screen
           name="inventory"
           options={{
             title: "Inventory",
-            href: canManage ? undefined : null,
+            href: null,
             tabBarIcon: ({ color, size, focused }) => (
               <Ionicons name={focused ? "cube" : "cube-outline"} color={color} size={size} />
             ),
@@ -88,6 +98,7 @@ export default function AppLayout() {
           name="reports"
           options={{
             title: "Reports",
+            href: canManage ? null : undefined,
             tabBarIcon: ({ color, size, focused }) => (
               <Ionicons
                 name={focused ? "document-text" : "document-text-outline"}

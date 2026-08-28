@@ -3,6 +3,7 @@ import { create } from "zustand";
 
 import { generateId } from "@/lib/id";
 import { getTodayIsoDate } from "@/lib/reports";
+import type { StockStatus } from "@/lib/stockStatus";
 import type { Report, ReportItemEntry } from "@/types/inventory";
 
 function mapDbReportToReport(row: Record<string, unknown>): Report {
@@ -21,6 +22,12 @@ function mapDbReportToReport(row: Record<string, unknown>): Report {
           recordedAt: snapshotRow.recorded_at as string,
         }))
         .sort((a, b) => a.recordedAt.localeCompare(b.recordedAt)),
+      statusPings: ((entryRow.report_item_status_pings as Record<string, unknown>[] | null) ?? [])
+        .map((row) => ({
+          status: row.status as StockStatus,
+          recordedAt: row.recorded_at as string,
+        }))
+        .sort((a, b) => a.recordedAt.localeCompare(b.recordedAt)),
     };
   });
 
@@ -34,12 +41,14 @@ function mapDbReportToReport(row: Record<string, unknown>): Report {
   };
 }
 
-const REPORT_SELECT = "*, report_item_entries(*, report_item_snapshots(*))";
+const REPORT_SELECT =
+  "*, report_item_entries(*, report_item_snapshots(*), report_item_status_pings(*))";
 
 export type ItemSubmission = {
   itemId: string;
   newSnapshotQuantity?: number;
   note?: string;
+  statusPing?: StockStatus;
 };
 
 export type SubmitReportResult = { reportId: string; failedItemIds: string[] } | null;
@@ -55,6 +64,7 @@ type ReportState = {
     date: string,
     content: string,
     itemSubmissions: ItemSubmission[],
+    submissionId: string,
   ) => Promise<SubmitReportResult>;
   getReportForReporterAndDate: (reporterId: string, date: string) => Report | undefined;
   getReportsForItem: (itemId: string) => Report[];
@@ -85,7 +95,7 @@ export const useReportStore = create<ReportState>()((set, get) => ({
     });
   },
 
-  submitReport: async (supabase, reporterId, date, content, itemSubmissions) => {
+  submitReport: async (supabase, reporterId, date, content, itemSubmissions, submissionId) => {
     if (date !== getTodayIsoDate()) {
       console.warn("[reportStore] Refusing to submit a report for a non-today date:", date);
       return null;
@@ -137,12 +147,27 @@ export const useReportStore = create<ReportState>()((set, get) => ({
       }
 
       if (submission.newSnapshotQuantity !== undefined) {
-        const { error: snapshotError } = await supabase.from("report_item_snapshots").insert({
-          id: generateId("snapshot"),
-          report_item_entry_id: entryData.id,
-          quantity: submission.newSnapshotQuantity,
-        });
+        const { error: snapshotError } = await supabase.from("report_item_snapshots").upsert(
+          {
+            id: `snapshot-${submissionId}-${submission.itemId}`,
+            report_item_entry_id: entryData.id,
+            quantity: submission.newSnapshotQuantity,
+          },
+          { onConflict: "id" },
+        );
         if (snapshotError) failedItemIds.push(submission.itemId);
+      }
+
+      if (submission.statusPing !== undefined) {
+        const { error: pingError } = await supabase.from("report_item_status_pings").upsert(
+          {
+            id: `status-ping-${submissionId}-${submission.itemId}`,
+            report_item_entry_id: entryData.id,
+            status: submission.statusPing,
+          },
+          { onConflict: "id" },
+        );
+        if (pingError) failedItemIds.push(submission.itemId);
       }
     }
 

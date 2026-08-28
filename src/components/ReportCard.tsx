@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Text, View } from "react-native";
 
+import { StockStatusBadge } from "@/components/StockStatusBadge";
 import { colors } from "@/constants/theme";
 import { getCategoryName, getUnitLabel } from "@/lib/inventoryLabels";
 import { formatReportDate, formatSnapshotTime } from "@/lib/reports";
@@ -84,6 +85,19 @@ export function ReportCard({ report, items, categories, units, isLocked }: Repor
                       )
                       .join("  →  ")}
                   </Text>
+                ) : null}
+
+                {entry.statusPings.length > 0 ? (
+                  <View className="gap-1">
+                    {entry.statusPings.map((ping, index) => (
+                      <View key={index} className="flex-row items-center justify-between gap-2">
+                        <StockStatusBadge status={ping.status} isOverridden={true} />
+                        <Text className="font-inter text-xs text-text-secondary">
+                          Reported at {formatSnapshotTime(ping.recordedAt)}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
                 ) : null}
 
                 {entry.note.trim().length > 0 ? (

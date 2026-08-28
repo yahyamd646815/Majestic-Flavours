@@ -32,6 +32,10 @@ This chat **never** writes app code directly into the repo. It writes prompt fil
 
 **Match his register.** He writes casually. Don't be stiff. Don't be sycophantic either — no "great question!" openers.
 
+**Yahya will sometimes forget to send or do something he said he would** — a summary, a file, an answer to an open question. Flag it directly and ask for it rather than silently proceeding without it or assuming it's no longer needed. This happened for real: he lost the Claude Code summary and files for the reload-loop fix (17j) and didn't realize until asked.
+
+**Check that an uploaded file's content actually arrived, not just that it's listed.** A different, mechanical problem from the one above — a file appears in the uploaded-files list but its content never shows up in the documents block. This has happened more than once in this project. Flag it immediately and ask for a resend rather than reasoning about (or worse, quietly assuming the contents of) a file that isn't actually there.
+
 **Correct him when he's wrong, and own it when you're wrong.** Both have happened repeatedly in this project and both were productive. If a diagnosis of his turns out to be incorrect, say so plainly and explain the actual mechanism.
 
 ---
@@ -116,6 +120,8 @@ Example:
 Example:
 > "If you find an actual bug while writing tests, stop and flag it rather than quietly fixing it inline."
 
+**Mark temporary code so it can never be mistaken for permanent code.** Whenever a prompt asks for something meant to be checked once and then deleted — a `console.log` verifying an effect only fires once, a debug render, anything that needs a real device or real-world condition to confirm rather than something Claude Code can verify itself — require the `// TEMPORARY-START: ... // TEMPORARY-END` marker from `AGENTS.md`. Without it, temporary scaffolding is indistinguishable from permanent code the next time anyone reads the file, including a future prompt-writing pass in this chat.
+
 ### Model tier guidance to include
 
 - **Opus** — real state/architecture/security reasoning, multi-library integration, anything touching identity or RLS.
@@ -153,6 +159,12 @@ Say which bucket each finding falls in and why. Don't apply things reflexively b
 - Both coexist on one device via `APP_VARIANT` in `eas.json` + a `.dev`-suffixed Android package id in `app.config.js`.
 - **Env vars must be registered with EAS** (`eas env:set`) or hardcoded in `eas.json`'s `env` block. A local `.env` file only reaches the dev client. This caused the first `preview` build to crash on the splash screen — the app's own missing-key guards were firing correctly.
 - **OTA updates** (`eas update --branch preview`) deliver **JS-only** changes. Native changes still need a full rebuild; `runtimeVersion: "fingerprint"` enforces this automatically.
+- **`eas update` on Yahya's machine needs `--no-bytecode`, always.** Windows Security's Smart App Control blocks `hermesc.exe` (the Hermes bytecode compiler) as an unrecognized/unsigned binary — confirmed directly via the actual Windows notification, not inferred. `--no-bytecode` skips that step entirely (ships plain JS instead of precompiled bytecode; the app JIT-compiles it on-device at startup — a small, well-understood cost). There's no `eas.json` or environment-variable equivalent for this flag — verified from `eas-cli`'s own source, it's a pure CLI argument with no other way to set it as a default — so it has to be typed by hand every time:
+  ```
+  eas update --branch preview --no-bytecode --message "..."
+  ```
+  The alternative (turning off Smart App Control system-wide) is not recommended — it's a machine-wide security posture change, not a per-app exception, and was a one-way, only-reversible-via-reinstall operation on earlier Windows 11 versions. Current behavior on Yahya's exact build is unconfirmed.
+- **Editing `sampleUsers.ts` does nothing on any device until an update is published.** It's a static file baked into the JS bundle. Reporting itself works independent of it (Clerk auth and Supabase writes use real Clerk ids directly), but every roster-based screen — reporter/employee filters, the "Today" view — iterates over this exact array, so a device on an older bundle simply won't have a newly-added person in it. This confusion happened for real: Yahya added new employees to the file and expected them to show up without realizing a publish step was still needed.
 - **EAS build times are queue-dependent and can exceed an hour at peak.** Do not state confident time estimates.
 - When giving CLI instructions with interactive prompts, **show the exact literal text to type at each prompt**. Listing variable names without showing the exact name/value split once produced a malformed variable named `Majestic_Flavors` containing a whole JSON fragment.
 
@@ -190,4 +202,5 @@ Before sending, confirm:
 - [ ] If this implements against a third-party *integration pattern* (not just a package's own exports), current docs were requested rather than assumed from memory.
 - [ ] Code is shown as **full files** unless a stated reason says otherwise.
 - [ ] Decisions are framed as his call, with the tradeoff and a recommendation.
+- [ ] Any temporary/verification-only code requested uses the `TEMPORARY-START`/`TEMPORARY-END` marker.
 - [ ] The response ends with **short, ordered, concrete next steps**.

@@ -1,6 +1,7 @@
 import { useUser } from "@clerk/expo";
 import { Ionicons } from "@expo/vector-icons";
-import { useMemo, useState } from "react";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useEffect, useMemo, useState } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -35,6 +36,26 @@ export default function Reports() {
   const reporterId = user?.id ?? null;
 
   const [isSelfReporting, setIsSelfReporting] = useState(false);
+
+  const router = useRouter();
+  const { selfReport } = useLocalSearchParams<{ selfReport?: string }>();
+
+  // The Manage tab's "Make a Report" button deep-links here via `?selfReport=1`
+  // so it lands directly in the self-report view instead of the browsing view.
+  // Adjusted during render (not an effect) per React's guidance for state that
+  // depends on a changed param: https://react.dev/learn/you-might-not-need-an-effect
+  const [consumedSelfReportParam, setConsumedSelfReportParam] = useState(selfReport);
+  if (selfReport !== consumedSelfReportParam) {
+    setConsumedSelfReportParam(selfReport);
+    if (canViewAllReports && selfReport === "1") setIsSelfReporting(true);
+  }
+
+  // Clearing the param is a side effect on the router (an external system), so
+  // it belongs in an effect. Doing it right after consuming "1" means a later
+  // "Make a Report" press is a real "" -> "1" transition, re-triggering this.
+  useEffect(() => {
+    if (selfReport === "1") router.setParams({ selfReport: "" });
+  }, [selfReport, router]);
 
   const assignedItems = useMemo(
     () =>
