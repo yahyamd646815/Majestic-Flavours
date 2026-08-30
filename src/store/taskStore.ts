@@ -68,6 +68,8 @@ type TaskState = {
   clearEmployeeIds: () => void;
   fetchAll: (supabase: SupabaseClient) => Promise<void>;
   addCategory: (supabase: SupabaseClient, name: string) => Promise<boolean>;
+  isCategoryInUse: (categoryId: string) => boolean;
+  deleteCategory: (supabase: SupabaseClient, id: string) => Promise<boolean>;
   /** Requires at least one assignee — enforced here as the last line of
    * defense, though `TaskFormModal` already blocks submission before this is
    * ever called with zero (AGENTS.md: app-level, not a DB constraint). */
@@ -101,6 +103,11 @@ type TaskState = {
     status: TaskCompletionStatus,
     note: string,
   ) => Promise<boolean>;
+  /** Who may actually delete is enforced by `tasks_delete_permission` in SQL
+   * (admin: any task; manager: only their own) — this just fires the delete
+   * and trusts RLS to reject anything it shouldn't allow. The UI decides
+   * separately whether to even offer the option (see `tasks.tsx`). */
+  deleteTask: (supabase: SupabaseClient, id: string) => Promise<boolean>;
 };
 
 export const useTaskStore = create<TaskState>()((set, get) => ({
@@ -171,6 +178,21 @@ export const useTaskStore = create<TaskState>()((set, get) => ({
 
     if (error || !data) return false;
     set((state) => ({ taskCategories: [...state.taskCategories, data as TaskCategory] }));
+    return true;
+  },
+
+  // Mirrors `inventoryStore`'s `isCategoryInUse`/`deleteCategory` exactly —
+  // a direct id comparison against tasks, no name lookup needed.
+  isCategoryInUse: (categoryId) =>
+    get().tasks.some((task) => task.categoryId === categoryId),
+
+  deleteCategory: async (supabase, id) => {
+    if (get().isCategoryInUse(id)) return false;
+    const { error } = await supabase.from("task_categories").delete().eq("id", id);
+    if (error) return false;
+    set((state) => ({
+      taskCategories: state.taskCategories.filter((category) => category.id !== id),
+    }));
     return true;
   },
 
@@ -362,6 +384,13 @@ export const useTaskStore = create<TaskState>()((set, get) => ({
           : existing,
       ),
     }));
+    return true;
+  },
+
+  deleteTask: async (supabase, id) => {
+    const { error } = await supabase.from("tasks").delete().eq("id", id);
+    if (error) return false;
+    set((state) => ({ tasks: state.tasks.filter((task) => task.id !== id) }));
     return true;
   },
 }));

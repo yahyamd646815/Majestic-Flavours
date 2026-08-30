@@ -10,17 +10,17 @@ type TaskAddMenuModalProps = {
    * state, not just button ordering. */
   hasCategories: boolean;
   onClose: () => void;
-  onCreateCategory: () => void;
+  onManageCategories: () => void;
   onCreateTask: () => void;
 };
 
 /** The "+" FAB's popup on the Tasks screen — routes to either
- * `TaskCategoryFormModal` or `TaskFormModal`. */
+ * `TaskCategoryManagerModal` or `TaskFormModal`. */
 export function TaskAddMenuModal({
   visible,
   hasCategories,
   onClose,
-  onCreateCategory,
+  onManageCategories,
   onCreateTask,
 }: TaskAddMenuModalProps) {
   return (
@@ -32,19 +32,19 @@ export function TaskAddMenuModal({
           <TouchableOpacity
             className="flex-row items-center gap-3 rounded-lg border border-border px-4 py-4"
             activeOpacity={0.8}
-            onPress={onCreateCategory}
+            onPress={onManageCategories}
             accessibilityRole="button"
-            accessibilityLabel="Create category"
+            accessibilityLabel="Manage categories"
           >
             <View className="h-10 w-10 items-center justify-center rounded-full bg-cream">
               <Ionicons name="pricetag-outline" size={20} color={colors.maroon} />
             </View>
             <View className="flex-1">
               <Text className="font-inter-semibold text-base text-text-primary">
-                Create Category
+                Manage Categories
               </Text>
               <Text className="font-inter text-xs text-text-secondary">
-                Group tasks, e.g. &ldquo;Cleaning&rdquo; or &ldquo;Prep&rdquo;
+                Add or remove categories, e.g. &ldquo;Cleaning&rdquo; or &ldquo;Prep&rdquo;
               </Text>
             </View>
           </TouchableOpacity>

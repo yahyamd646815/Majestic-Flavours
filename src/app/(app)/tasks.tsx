@@ -6,6 +6,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { BulkAssignModal } from "@/components/BulkAssignModal";
 import { CategoryFilter } from "@/components/CategoryFilter";
+import { DeleteConfirmModal } from "@/components/DeleteConfirmModal";
 import { EmployeeFilter } from "@/components/EmployeeFilter";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
@@ -13,7 +14,7 @@ import { SearchBar } from "@/components/SearchBar";
 import { SortToggle } from "@/components/SortToggle";
 import { TaskAddMenuModal } from "@/components/TaskAddMenuModal";
 import { TaskCard } from "@/components/TaskCard";
-import { TaskCategoryFormModal } from "@/components/TaskCategoryFormModal";
+import { TaskCategoryManagerModal } from "@/components/TaskCategoryManagerModal";
 import { TaskFormModal, type TaskFormValues } from "@/components/TaskFormModal";
 import { colors } from "@/constants/theme";
 import { sampleUsers } from "@/data/sampleUsers";
@@ -51,11 +52,14 @@ export default function Tasks() {
   const toggleEmployeeId = useTaskStore((state) => state.toggleEmployeeId);
   const clearEmployeeIds = useTaskStore((state) => state.clearEmployeeIds);
   const addCategory = useTaskStore((state) => state.addCategory);
+  const isCategoryInUse = useTaskStore((state) => state.isCategoryInUse);
+  const deleteCategory = useTaskStore((state) => state.deleteCategory);
   const addTask = useTaskStore((state) => state.addTask);
   const updateTask = useTaskStore((state) => state.updateTask);
   const addAssignment = useTaskStore((state) => state.addAssignment);
   const removeAssignment = useTaskStore((state) => state.removeAssignment);
   const completeTask = useTaskStore((state) => state.completeTask);
+  const deleteTask = useTaskStore((state) => state.deleteTask);
 
   const appUsers = useAppUsersStore((state) => state.users);
   const assignableEmployees = useMemo(
@@ -67,19 +71,19 @@ export default function Tasks() {
   const [sortMode, setSortMode] = useState<TaskSortMode>("recent");
 
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
-  const [isCategoryFormOpen, setIsCategoryFormOpen] = useState(false);
-  const [isSavingCategory, setIsSavingCategory] = useState(false);
+  const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false);
   const [isTaskFormOpen, setIsTaskFormOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Task | null>(null);
   // Only the id is held, never a copy of the task — `editTask` below is then
   // always resolved from the live store. That is what keeps a chip removed
   // via TaskCard from being silently re-added by a save that diffed against a
   // stale snapshot captured when the form opened.
   const [editTaskId, setEditTaskId] = useState<string | null>(null);
-  // Bumped on every open so TaskFormModal/TaskCategoryFormModal remount (via
-  // their `key`) and their fields reset from scratch instead of carrying over
-  // the previous session, mirroring ItemFormModal's `formSession`.
+  // Bumped on every open so TaskFormModal/TaskCategoryManagerModal remount
+  // (via their `key`) and their fields reset from scratch instead of carrying
+  // over the previous session, mirroring ItemFormModal's `formSession`.
   const [taskFormSession, setTaskFormSession] = useState(0);
-  const [categoryFormSession, setCategoryFormSession] = useState(0);
+  const [categoryManagerSession, setCategoryManagerSession] = useState(0);
 
   // Bulk assignment, mirroring Inventory's. `selectedTaskIds` deliberately
   // survives search/category/employee filter changes — that is what lets one
@@ -232,21 +236,30 @@ export default function Tasks() {
     }
   }
 
-  async function handleCreateCategory(name: string) {
-    setIsSavingCategory(true);
-    try {
-      const succeeded = await addCategory(supabase, name);
-      if (!succeeded) {
-        Alert.alert(
-          "Could not create category",
-          "Check the name and your connection, then try again.",
-        );
-        return;
-      }
-      setIsCategoryFormOpen(false);
-    } finally {
-      setIsSavingCategory(false);
+  // Mirrors Settings' inventory-category delete flow exactly (see
+  // `settings.tsx`'s `performDeleteCategory`/`handleDeleteCategory`).
+  async function performDeleteTaskCategory(id: string) {
+    const succeeded = await deleteCategory(supabase, id);
+    if (!succeeded) {
+      Alert.alert(
+        "Could not delete category",
+        "The category was not deleted. Check your connection and try again.",
+      );
     }
+  }
+
+  function handleDeleteTaskCategory(id: string) {
+    if (isCategoryInUse(id)) {
+      Alert.alert(
+        "Category in use",
+        "Some tasks are still assigned to this category. Remove them first.",
+      );
+      return;
+    }
+    Alert.alert("Delete this category?", undefined, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: () => void performDeleteTaskCategory(id) },
+    ]);
   }
 
   async function handleSubmitTask(values: TaskFormValues) {
@@ -309,6 +322,26 @@ export default function Tasks() {
       Alert.alert(
         "Could not save",
         "The task update was not saved. Check your connection and try again.",
+      );
+    }
+  }
+
+  // Mirrors `tasks_delete_permission` in SQL: admin can delete any task,
+  // manager only their own, employee never — so the UI never offers an
+  // action the database would reject anyway.
+  function canDeleteTask(task: Task): boolean {
+    if (role === "admin") return true;
+    if (role === "manager") return task.createdBy === currentUserClerkId;
+    return false;
+  }
+
+  // Reached only after DeleteConfirmModal's two-step confirmation passes.
+  async function handleDelete(task: Task) {
+    const succeeded = await deleteTask(supabase, task.id);
+    if (!succeeded) {
+      Alert.alert(
+        "Could not delete task",
+        "The task was not deleted. Check your connection and try again.",
       );
     }
   }
@@ -434,6 +467,8 @@ export default function Tasks() {
                   }
                   onComplete={(status, note) => void handleComplete(item.id, status, note)}
                   onEdit={() => openEditTaskForm(item.id)}
+                  canDelete={canDeleteTask(item)}
+                  onDelete={() => setDeleteTarget(item)}
                   selectionMode={isSelectionMode}
                   isSelected={selectedTaskIds.has(item.id)}
                   onToggleSelect={() => toggleTaskSelected(item.id)}
@@ -504,10 +539,10 @@ export default function Tasks() {
         visible={isAddMenuOpen}
         hasCategories={taskCategories.length > 0}
         onClose={() => setIsAddMenuOpen(false)}
-        onCreateCategory={() => {
+        onManageCategories={() => {
           setIsAddMenuOpen(false);
-          setCategoryFormSession((session) => session + 1);
-          setIsCategoryFormOpen(true);
+          setCategoryManagerSession((session) => session + 1);
+          setIsCategoryManagerOpen(true);
         }}
         onCreateTask={() => {
           setIsAddMenuOpen(false);
@@ -515,12 +550,13 @@ export default function Tasks() {
         }}
       />
 
-      <TaskCategoryFormModal
-        key={`category-form-${categoryFormSession}`}
-        visible={isCategoryFormOpen}
-        isSaving={isSavingCategory}
-        onClose={() => setIsCategoryFormOpen(false)}
-        onSubmit={(name) => void handleCreateCategory(name)}
+      <TaskCategoryManagerModal
+        key={`category-manager-${categoryManagerSession}`}
+        visible={isCategoryManagerOpen}
+        categories={taskCategories}
+        onClose={() => setIsCategoryManagerOpen(false)}
+        onAdd={(name) => addCategory(supabase, name)}
+        onDelete={handleDeleteTaskCategory}
       />
 
       <TaskFormModal
@@ -541,6 +577,15 @@ export default function Tasks() {
         onClose={() => setIsAssignOpen(false)}
         onAssign={(clerkUserId) => void handleBulkAssign(clerkUserId)}
         onUnassign={(clerkUserId) => void handleBulkUnassign(clerkUserId)}
+      />
+
+      <DeleteConfirmModal
+        visible={deleteTarget !== null}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) void handleDelete(deleteTarget);
+          setDeleteTarget(null);
+        }}
       />
     </SafeAreaView>
   );

@@ -24,6 +24,12 @@ type TaskCardProps = {
   onComplete: (status: TaskCompletionStatus, note: string) => void;
   /** Rendered for Admin/Manager only — opens `TaskFormModal` in edit mode. */
   onEdit: () => void;
+  /** Whether the Delete action is offered at all — decided by the caller from
+   * the same boundary `tasks_delete_permission` enforces in SQL (admin: any
+   * task; manager: only tasks they created), so this component never has to
+   * know about roles or `createdBy` itself. */
+  canDelete: boolean;
+  onDelete: () => void;
   /**
    * Bulk-selection mode. While true the whole card is a selection target and
    * every other action — chip removal, Complete/Submit Reason, Edit — is not
@@ -42,6 +48,8 @@ export function TaskCard({
   onRemoveAssignment,
   onComplete,
   onEdit,
+  canDelete,
+  onDelete,
   selectionMode = false,
   isSelected = false,
   onToggleSelect,
@@ -258,6 +266,19 @@ export function TaskCard({
             <Ionicons name="create-outline" size={16} color={colors.maroon} />
             <Text className="font-inter-semibold text-sm text-maroon">Edit</Text>
           </TouchableOpacity>
+
+          {canDelete ? (
+            <TouchableOpacity
+              className="flex-1 flex-row items-center justify-center gap-1 rounded-lg border border-out-of-stock py-2"
+              activeOpacity={0.8}
+              onPress={onDelete}
+              accessibilityRole="button"
+              accessibilityLabel={`Delete ${task.title}`}
+            >
+              <Ionicons name="trash-outline" size={16} color={colors.outOfStock} />
+              <Text className="font-inter-semibold text-sm text-out-of-stock">Delete</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       ) : null}
     </>

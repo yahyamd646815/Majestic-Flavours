@@ -1,13 +1,15 @@
+import { useUser } from "@clerk/expo";
 import NativeDateTimePicker from "@expo/ui/community/datetime-picker";
 import { useMemo, useState } from "react";
 import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { sampleUsers } from "@/data/sampleUsers";
-import { getAssignableEmployees } from "@/lib/assignableEmployees";
+import { getAssignableTaskParticipants } from "@/lib/assignableEmployees";
 import { dueAtToPickerDate, resolveDueAt } from "@/lib/tasks";
 import { useAppUsersStore } from "@/store/appUsersStore";
 import { useTaskStore } from "@/store/taskStore";
+import { parseRole } from "@/types/role";
 import type { Task } from "@/types/tasks";
 
 export type TaskFormValues = {
@@ -35,15 +37,25 @@ type TaskFormModalProps = {
  * from `TaskAddMenuModal`'s "Create Task" option (itself unreachable without
  * at least one task category existing) and from `TaskCard`'s Edit action.
  * Mirrors `ItemFormModal`'s structure closely: same category-chips /
- * assigned-employee-chips pattern, reusing `getAssignableEmployees`. */
+ * assigned-employee-chips pattern, but the picker pool comes from
+ * `getAssignableTaskParticipants` (wider than Inventory's employee-only
+ * `getAssignableEmployees`) since Admin/Manager can assign tasks to
+ * themselves and, for Admin, other admins/managers too. */
 export function TaskFormModal({ visible, task, onClose, onSubmit }: TaskFormModalProps) {
+  const { user } = useUser();
+  // Falls back to the most restrictive role (empty picker) if this ever opens
+  // before the role claim is available — it is otherwise only reachable by a
+  // signed-in Admin/Manager per `tasks.tsx`'s `canManage` gate.
+  const creatorRole = parseRole(user?.publicMetadata?.role) ?? "employee";
+  const currentUserClerkId = user?.id ?? "";
+
   const taskCategories = useTaskStore((state) => state.taskCategories);
   const appUsers = useAppUsersStore((state) => state.users);
   const appUsersLoading = useAppUsersStore((state) => state.isLoading);
 
   const assignableEmployees = useMemo(
-    () => getAssignableEmployees(sampleUsers, appUsers),
-    [appUsers],
+    () => getAssignableTaskParticipants(creatorRole, currentUserClerkId, sampleUsers, appUsers),
+    [creatorRole, currentUserClerkId, appUsers],
   );
 
   const [title, setTitle] = useState(task?.title ?? "");
