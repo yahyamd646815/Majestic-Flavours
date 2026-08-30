@@ -345,6 +345,18 @@ Never skip or shortcut this flow for any delete action.
 
 ---
 
+## To-Do List Rules
+
+- `task_categories` is a completely separate table from inventory's `categories` — different domain, don't conflate them or reuse inventory category components without checking they actually apply.
+- **Completion is per-assignee, not per-task** (revised from an earlier, simpler design — `task_completions` is keyed on `(task_id, employee_clerk_id)`, not `task_id` alone). But the *closing* rule stays task-level: any one assignee completing it closes the task for everyone. A miss is different — every assigned person must submit their own reason individually; there's no single "the task was missed" record. Use `isTaskFullyCompleted`/`hasEmployeeResponded`/`isTaskOverdueForEmployee` in `lib/tasks.ts` — never re-derive this inline.
+- Admin/Manager can only complete or miss-report a task they are genuinely assigned to (enforced by RLS, mirrored client-side to fail fast). The fix for "an admin/manager accidentally needs to resolve something they weren't assigned to" is deleting the task, not a special completion override.
+- Task deletion: Admin can delete any task. Manager can delete only tasks they created themselves — a narrow carve-out from Manager's usual no-deletion baseline everywhere else in this app, not a general new deletion right.
+- Assignable pool depends on who's creating the task, not a single shared list: Admin can assign to employees, themselves, other admins, and managers. Manager can assign to employees and themselves only. Use `getAssignableTaskParticipants`, not `getAssignableEmployees` (which stays employee-only, still correct for Inventory).
+- Recurrence (data model, occurrence generation, and the calendar UI for building/previewing it) lands in later prompts — as of the foundation work, `tasks` covers one-time tasks only. Don't assume recurrence fields exist on `tasks` until those prompts land.
+- The employee/"Unassigned" filter on the to-do list reuses the same asymmetric logic as Inventory's (`matchesEmployeeFilter` in `lib/inventoryFilters.ts`) — combining a real employee with "Unassigned" means *not assigned to that employee*, not "assigned to nobody."
+
+---
+
 ## Report Rules
 
 - Employees submit daily reports for their assigned items only. Admins and Managers can also self-report via "+ Make a Report" — reports are not employee-exclusive, so don't assume `role === "employee"` when handling report data generally.

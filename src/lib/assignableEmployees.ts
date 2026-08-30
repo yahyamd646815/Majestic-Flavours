@@ -1,5 +1,6 @@
 import type { SyncedUser } from "@/store/appUsersStore";
 import type { AppUser } from "@/types/inventory";
+import type { Role } from "@/types/role";
 
 export type AssignableEmployee = {
   /** The roster row's own id — stable list key, never an assignment target. */
@@ -63,4 +64,27 @@ export function getAssignableEmployees(
     name: employee.name,
     clerkUserId: employee.clerkUserId,
   }));
+}
+
+/**
+ * Task-assignment pool, which is wider than {@link getAssignableEmployees}
+ * and role-dependent on the creator: Admin can assign to everyone (employees,
+ * other admins, managers, and themselves); Manager can assign to employees
+ * and themselves only — never other managers, never admins. Employee
+ * self-assignment is deferred, so any other role gets an empty pool.
+ */
+export function getAssignableTaskParticipants(
+  creatorRole: Role,
+  currentUserClerkId: string,
+  roster: AppUser[],
+  appUsers: SyncedUser[],
+): AssignableEmployee[] {
+  const bridged = bridgeRosterByEmail(roster, appUsers);
+  if (creatorRole === "admin") return bridged;
+  if (creatorRole === "manager") {
+    return bridged.filter(
+      (person) => person.role === "employee" || person.clerkUserId === currentUserClerkId,
+    );
+  }
+  return [];
 }

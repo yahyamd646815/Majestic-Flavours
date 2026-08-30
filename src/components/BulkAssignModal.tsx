@@ -1,18 +1,27 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import { colors, spacing } from "@/constants/theme";
-import { sampleUsers } from "@/data/sampleUsers";
-import { getAssignableEmployees } from "@/lib/assignableEmployees";
+import type { AssignableEmployee } from "@/lib/assignableEmployees";
 import { useAppUsersStore } from "@/store/appUsersStore";
 
 type BulkAssignMode = "assign" | "unassign";
 
 type BulkAssignModalProps = {
   visible: boolean;
-  /** How many inventory items the chosen employee will be added to or removed from. */
-  itemCount: number;
+  /** How many rows the chosen person will be added to or removed from. */
+  selectedCount: number;
+  /** What those rows are called in this screen's copy — "item" or "task".
+   * Pluralized by appending "s", which suits both callers. */
+  targetNoun: string;
+  /**
+   * The pool to pick from, injected rather than computed here. Inventory
+   * assigns employees only (`getAssignableEmployees`), while Tasks' pool
+   * depends on the signed-in person's own role — so this component can no
+   * longer own that decision without picking the wrong one for someone.
+   */
+  employees: AssignableEmployee[];
   isAssigning: boolean;
   onClose: () => void;
   onAssign: (clerkUserId: string) => void;
@@ -20,43 +29,39 @@ type BulkAssignModalProps = {
 };
 
 /**
- * Picks ONE employee to add to or remove from every selected inventory item,
- * depending on the Assign/Unassign mode toggle.
+ * Picks ONE person to add to or remove from every selected row — inventory
+ * items on the Inventory screen, tasks on the Tasks screen — depending on the
+ * Assign/Unassign mode toggle.
  *
- * Deliberately not `ItemFormModal`'s picker: that one toggles several employees
- * for a single item, this one picks a single employee for many items. The
- * underlying roster-to-Clerk bridging is shared through
- * `getAssignableEmployees` so both stay consistent.
+ * Deliberately not `ItemFormModal`'s picker: that one toggles several people
+ * for a single row, this one picks a single person for many rows.
  *
- * Both modes are additive/subtractive only — an item already in the target
- * state (already assigned, or already missing the employee) is left as-is,
- * never duplicated and never erroring (see `handleBulkAssign` /
- * `handleBulkUnassign` on the Inventory screen).
+ * Both modes are additive/subtractive only — a row already in the target
+ * state (already assigned, or already missing that person) is left as-is,
+ * never duplicated and never erroring (see the `handleBulkAssign` /
+ * `handleBulkUnassign` pair on either screen).
  */
 export function BulkAssignModal({
   visible,
-  itemCount,
+  selectedCount,
+  targetNoun,
+  employees,
   isAssigning,
   onClose,
   onAssign,
   onUnassign,
 }: BulkAssignModalProps) {
-  const appUsers = useAppUsersStore((state) => state.users);
   const appUsersLoading = useAppUsersStore((state) => state.isLoading);
 
-  const assignableEmployees = useMemo(
-    () => getAssignableEmployees(sampleUsers, appUsers),
-    [appUsers],
-  );
-
   // Defaults to "assign" every time the modal opens (it remounts via the
-  // `key` the Inventory screen bumps on each open), so existing behavior is
-  // unchanged unless someone actively switches modes.
+  // `key` each screen bumps on open), so existing behavior is unchanged
+  // unless someone actively switches modes.
   const [mode, setMode] = useState<BulkAssignMode>("assign");
   const [selectedClerkUserId, setSelectedClerkUserId] = useState<string | null>(null);
 
   const canSubmit =
-    selectedClerkUserId !== null && itemCount > 0 && !appUsersLoading && !isAssigning;
+    selectedClerkUserId !== null && selectedCount > 0 && !appUsersLoading && !isAssigning;
+  const targetLabel = `${selectedCount} selected ${targetNoun}${selectedCount === 1 ? "" : "s"}`;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -112,8 +117,8 @@ export function BulkAssignModal({
 
             <Text className="mt-3 font-inter text-sm text-text-secondary">
               {mode === "assign"
-                ? `Adds one employee to ${itemCount} selected item${itemCount === 1 ? "" : "s"}. Existing assignments are kept.`
-                : `Removes one employee from ${itemCount} selected item${itemCount === 1 ? "" : "s"}. Items without that employee are left untouched.`}
+                ? `Adds one person to ${targetLabel}. Existing assignments are kept.`
+                : `Removes one person from ${targetLabel}. Those without that person are left untouched.`}
             </Text>
 
             <View className="mt-4 gap-2">
@@ -121,12 +126,12 @@ export function BulkAssignModal({
                 <Text className="font-inter text-sm text-text-secondary">
                   Loading employees...
                 </Text>
-              ) : assignableEmployees.length === 0 ? (
+              ) : employees.length === 0 ? (
                 <Text className="font-inter text-sm text-text-secondary">
-                  No employees available to assign.
+                  No one available to assign.
                 </Text>
               ) : (
-                assignableEmployees.map((employee) => {
+                employees.map((employee) => {
                   const isDisabled = employee.clerkUserId === undefined;
                   const isActive =
                     !isDisabled && selectedClerkUserId === employee.clerkUserId;

@@ -51,7 +51,7 @@ Almost every serious problem in this project came from something being *assumed*
 | Does this package need a config plugin in `app.config.js`? | Download the tarball, `tar -tzf` it, grep for `app.plugin.js`. This caught `expo-file-system`'s missing plugin entry. |
 | Does adding this package require a native rebuild? | Same tarball — grep for `.podspec`, `/android/src/main/`. If native source exists, a rebuild is required and must be stated in the prompt. |
 | What is this library's exact API signature? | Read the installed `.d.ts` from the tarball. This caught `posthog.identify()`'s third argument being `PostHogCaptureOptions`, not a `$set_once` bag — the prompt's version would have silently dropped data. |
-| What does this CLI command actually prompt for / do? | Fetch the command's source from the `expo/eas-cli` GitHub repo. This caught `eas env:create` being deprecated in favor of `eas env:set`. |
+| What does this CLI command actually prompt for / do? | Check `package-lock.json` for the actually-pinned `eas-cli` version first, then fetch that specific tagged release from the `expo/eas-cli` GitHub repo — not the `main` branch, which can drift from what's actually installed. This caught `eas env:create` being deprecated in favor of `eas env:set`, and traced a `--no-bytecode` flag failure down to which of three internal bundling code paths a project actually hits. (CodeRabbit caught a real gap here: an earlier pass fetched from `main` without checking the pinned version first.) |
 | Did the generated file actually come out right? | Generate it and inspect it. Unzipping the produced `.xlsx` and reading `styles.xml` proved the bold header does *not* render on the free `xlsx` build — a Pro-only feature. |
 | Is this claim about the repo's current state true? | Ask for the file, or check `/mnt/project`. **Never assert it from memory.** |
 
@@ -83,6 +83,14 @@ One feature per prompt. Fresh branch. CodeRabbit review. Commit.
 
 **When a prompt is split into parts meant to land as separate commits, say explicitly who commits.** "Commit after each part" is ambiguous — Claude Code will reasonably read it as an instruction to run `git commit` itself, which contradicts the division of labor in §1 (Yahya runs all terminal commands, including git). Say it as: "Stop after each part and tell Yahya it's ready to commit — don't run git yourself." This is a real mistake that happened in this project, not a hypothetical.
 
+**"Stop after each part" means Claude Code genuinely halts and waits for an explicit go-ahead — it does not mean "note commit points while continuing through the rest."** This surprised Yahya the first time a multi-part prompt (`v2-03-a2`) actually stopped after Part A and waited, rather than running straight through. This is the correct, intended behavior — Claude Code following the instruction as written — not something to fix.
+
+**Default to one file, even a large one — most cohesive work runs fine in a single session regardless of size.** Splitting into separate files is the exception, not the default. This took two rounds to calibrate correctly: first Yahya asked for separate files for any stop requiring a fresh chat, which turned out to be too broad — plenty of bigger prompts than `v2-03-a2`'s individual parts ran fine all at once with no splitting. The actual trigger isn't size, it's **whether the pieces are genuinely independent, unrelated concerns bundled together for convenience** (like `v2-03-a2`'s seven distinct add-ons — editing, a description field, mass-assign, a completion-model redesign, an assignable-pool function, deletion, category management — none of which depended on the others) **or whether Yahya specifically wants a pause point at a particular spot.** A single feature that's simply large, but cohesive — built as one thing, naturally — stays one file even if it's substantial.
+
+When a split genuinely is warranted, give each piece its own fully self-contained file — repeat whatever context it needs, don't just say "see Part D." A fresh Claude Code session has no memory of a sibling file; it only has this file, plus whatever it reads directly from the current repo. This doesn't conflict with the shared-prefix bundling convention below — that's about naming files that belong to one feature together, independent of whether they end up as one file or several.
+
+**When one feature is genuinely too large for a single prompt, bundle the sub-prompts with a shared prefix and a letter suffix** (e.g. `v2-03-a`, `v2-03-b`, `v2-03-c`...) rather than giving each an unrelated standalone name. This isn't a new convention — it revives exactly how the original Supabase migration was split (`13a` through `13d`). A shared prefix makes it visually obvious the pieces belong together and keeps them grouped in whatever folder Yahya organizes prompts into, whereas a prompt that's genuinely independent (not part of a bundle) keeps its own standalone name — don't force unrelated work into a bundle just because it happened nearby in time.
+
 ### Rules learned from prompts that went wrong
 
 **Audit the source prompt against the current code before running it.** The original numbered prompt files (01–16) were adapted from a JavaScript Mastery tutorial and written before later reworks. Two of them were materially stale by the time they ran:
@@ -108,8 +116,6 @@ Example:
 
 This is what let Claude Code catch the PostHog `identify()` signature problem.
 
-**State native-module consequences up front.** If the package ships native code, the prompt must say a rebuild of both `development` and `preview` profiles is required afterward, and that OTA updates will not deliver it.
-
 **Prefer the robust design over the patch, especially when a rule has more than one entry point.** If two or more code paths can trigger the same consequence, put the logic where all paths funnel through, not at each call site individually — a call-site approach will eventually miss one.
 
 Example:
@@ -122,11 +128,22 @@ Example:
 
 **Mark temporary code so it can never be mistaken for permanent code.** Whenever a prompt asks for something meant to be checked once and then deleted — a `console.log` verifying an effect only fires once, a debug render, anything that needs a real device or real-world condition to confirm rather than something Claude Code can verify itself — require the `// TEMPORARY-START: ... // TEMPORARY-END` marker from `AGENTS.md`. Without it, temporary scaffolding is indistinguishable from permanent code the next time anyone reads the file, including a future prompt-writing pass in this chat.
 
-### Model tier guidance to include
+### Model and effort guidance — state both explicitly, every time
 
-- **Opus** — real state/architecture/security reasoning, multi-library integration, anything touching identity or RLS.
-- **Sonnet** — straightforward UI work against an established pattern.
-- Trivial cleanup doesn't need a prompt file at all.
+Two separate dimensions, not one — conflating them was a real gap in this project: `v2-03-a` was handed off with no explicit recommendation at all, and Yahya had to guess (Sonnet, extra-high — which turned out right, but by matching his own instinct, not because he'd been told).
+
+**Model — driven by whether there's an established pattern to mirror, not by size.**
+- **Sonnet** — even a *large* prompt, if it's fundamentally pattern-following. `v2-03-a` is a good example: genuinely big, but its whole structure mirrors Inventory's existing screen/store/component shape closely, which is exactly what Sonnet handles well regardless of volume.
+- **Opus** — genuinely novel architecture/security reasoning with no close precedent to mirror: RLS policy design from scratch, concurrency/atomicity tradeoffs, a cross-cutting refactor touching many unrelated files at once.
+
+**Effort — driven by size and how many interacting pieces need to stay mutually consistent, independent of novelty.** Yahya's own calibration, adopted here:
+- **Medium** — small, contained fixes (a two-line key fix, a single function change).
+- **High** — most normal single-feature prompts.
+- **Extra-high** — large multi-file/multi-component prompts, or anything with a subtle correctness hazard worth extra deliberation (e.g. the retry-idempotency design in `17m`).
+
+**State both explicitly, in two places:** in chat when handing the prompt over, *and* as a one-line note near the top of the prompt file itself (right after the "Read AGENTS.md" anchor line) — so the recommendation travels with the file into whatever folder Yahya organizes it into, not just this conversation.
+
+**When a multi-part prompt genuinely halts between parts (see the note above — this is real, not hypothetical), recommend model and effort *per part*, not one blanket level for the whole file.** A single hard part (real novelty) shouldn't drag every other, easier part up to its level if the parts run as independent sessions anyway — and conversely, a whole bundle shouldn't be judged "easy" just because most of its parts are, if one part is genuinely novel. Check whether the harder part's *design* is actually depended on by the later parts, or just bundled with them for scope convenience — if later parts don't structurally need the hard part's internals, they can drop back down once it's past. This came up for real with `v2-03-a2`: Part D (a genuine schema/logic redesign) warranted Opus; Parts A/B/C/E/F/G, all pattern-following and structurally independent of Part D's internals, didn't.
 
 ---
 
@@ -144,18 +161,18 @@ Example:
 
 Triage into three buckets:
 
-1. **Real bugs / data-integrity issues** — fix. It has caught genuine ones here: a `useEffect` dependency bug, a missing transaction wrapper on the seed SQL, a stale event schema.
+1. **Real bugs / data-integrity issues** — fix. It has caught genuine ones here: a `useEffect` dependency bug, a missing transaction wrapper on the seed SQL, a stale event schema, an overly-permissive RLS policy, a wrong-id comparison, a retry-duplication data-integrity gap.
 2. **Reasonable-but-wrong for this codebase** — reply on the PR explaining the reasoning and resolve without applying. It once suggested reintroducing an auth pattern that had been deliberately dismantled to fix a race condition. Leaving the written rationale on the PR is worth doing.
 3. **Lint/style noise** — `.env` key ordering, missing code-fence language tags, docstring coverage. Skip unless batching a cleanup.
 
-Say which bucket each finding falls in and why. Don't apply things reflexively because a bot said so.
+Say which bucket each finding falls in and why. Don't apply things reflexively because a bot said so. When a finding is real but represents a genuinely larger undertaking than a quick fix (e.g. a full transactional-RPC redesign vs. a targeted patch), present the tradeoff and let Yahya choose the scope and sequencing rather than picking unilaterally.
 
 ---
 
 ## 7. Deployment knowledge (this project's specifics)
 
-- **`development` profile** = dev client, requires `npx expo start` running on Yahya's laptop. For his own iteration only.
-- **`preview` profile** = standalone APK with the JS bundle baked in. This is what restaurant staff actually use. No laptop dependency — essential for a 24-hour restaurant.
+- **`development` profile** = dev client, requires `npx expo start` running on Yahya's laptop. His own iteration only.
+- **`preview` profile** = standalone APK, JS bundle baked in. This is what restaurant staff actually use. No laptop dependency — essential for a 24-hour restaurant.
 - Both coexist on one device via `APP_VARIANT` in `eas.json` + a `.dev`-suffixed Android package id in `app.config.js`.
 - **Env vars must be registered with EAS** (`eas env:set`) or hardcoded in `eas.json`'s `env` block. A local `.env` file only reaches the dev client. This caused the first `preview` build to crash on the splash screen — the app's own missing-key guards were firing correctly.
 - **OTA updates** (`eas update --branch preview`) deliver **JS-only** changes. Native changes still need a full rebuild; `runtimeVersion: "fingerprint"` enforces this automatically.
@@ -167,6 +184,8 @@ Say which bucket each finding falls in and why. Don't apply things reflexively b
 - **Editing `sampleUsers.ts` does nothing on any device until an update is published.** It's a static file baked into the JS bundle. Reporting itself works independent of it (Clerk auth and Supabase writes use real Clerk ids directly), but every roster-based screen — reporter/employee filters, the "Today" view — iterates over this exact array, so a device on an older bundle simply won't have a newly-added person in it. This confusion happened for real: Yahya added new employees to the file and expected them to show up without realizing a publish step was still needed.
 - **EAS build times are queue-dependent and can exceed an hour at peak.** Do not state confident time estimates.
 - When giving CLI instructions with interactive prompts, **show the exact literal text to type at each prompt**. Listing variable names without showing the exact name/value split once produced a malformed variable named `Majestic_Flavors` containing a whole JSON fragment.
+- **`eas build` runs remotely on Expo's servers**, not locally — safe to close VS Code/the laptop entirely once a build shows as queued.
+- **`npm ci` (what EAS's remote build always uses) is strict** in a way local `npm install` isn't — a `package.json`/`package-lock.json` drift that `npm install` silently tolerates will hard-fail a remote build. Worth running `npm ci` locally to verify before triggering a remote build, not just `npm install`.
 
 ---
 
@@ -175,7 +194,7 @@ Say which bucket each finding falls in and why. Don't apply things reflexively b
 Do not re-litigate these; they are settled.
 
 - **No `userStore`, ever.** Clerk is the source of truth for identity and role.
-- **Supabase is authoritative.** All Zustand stores are in-memory caches. No AsyncStorage persistence.
+- **Supabase is authoritative.** All Zustand stores are in-memory caches. No AsyncStorage persistence — with one narrow, confirmed exception: a background submission queue may persist, since it holds pending local writes rather than a cache of server data, and must be keyed per Clerk user id to avoid leaking one person's queue into another's session on a shared device.
 - **Reports are draft-until-submit** via `DraftReportContext`, session-only.
 - **Snapshot history is append-only**, enforced at both app and RLS level.
 - **Real Clerk user ids** are used for report attribution and item assignment. `sampleUsers.ts` remains only as a hand-maintained role directory, bridged by email — scheduled for removal.

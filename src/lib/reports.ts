@@ -44,6 +44,46 @@ export function formatSnapshotTime(isoTimestamp: string): string {
   return parsed.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 }
 
+/**
+ * Converts Riyadh wall-clock date/time components (1-indexed month, matching
+ * how `YYYY-MM-DD` strings read) to the equivalent UTC ISO timestamp. Same
+ * fixed-UTC+3, no-DST reasoning as `getTodayIsoDate`, just inverted: build the
+ * instant directly from Riyadh digits rather than deriving Riyadh digits from
+ * an instant.
+ */
+export function riyadhDateTimeToIso(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+): string {
+  return new Date(Date.UTC(year, month - 1, day, hour - 3, minute, 0, 0)).toISOString();
+}
+
+/** 23:59 on the given Riyadh calendar date (`YYYY-MM-DD`), as a UTC ISO
+ * timestamp — the default a task's `due_at` resolves to when no due time was
+ * explicitly chosen (AGENTS.md → to-do task creation rules). */
+export function getEndOfDayRiyadhIso(riyadhIsoDate: string): string {
+  const [year, month, day] = riyadhIsoDate.split("-").map(Number);
+  return riyadhDateTimeToIso(year, month, day, 23, 59);
+}
+
+/** "12 Jul 2026 · 14:32" — a task's due date and time together, for display
+ * only (uses the device's own locale rendering, same as `formatSnapshotTime`
+ * — this is not the Riyadh-authoritative value, which is `dueAt` itself). */
+export function formatDueDateTime(isoTimestamp: string): string {
+  const parsed = new Date(isoTimestamp);
+  if (Number.isNaN(parsed.getTime())) return isoTimestamp;
+  const datePart = parsed.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+  const timePart = parsed.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  return `${datePart} · ${timePart}`;
+}
+
 /** A report matches when any item it touched belongs to one of the given
  * categories. Callers are expected to treat an empty `categoryIds` set as
  * "filter inactive" themselves — this only checks actual membership. */

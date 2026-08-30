@@ -5,6 +5,7 @@ import { useSupabaseClient } from "@/lib/supabase";
 import { useAppUsersStore } from "@/store/appUsersStore";
 import { useInventoryStore } from "@/store/inventoryStore";
 import { useReportStore } from "@/store/reportStore";
+import { useTaskStore } from "@/store/taskStore";
 import { useUnitsStore } from "@/store/unitsStore";
 
 /**
@@ -22,6 +23,7 @@ export function useSupabaseSync(isSignedIn: boolean) {
   const fetchInventory = useInventoryStore((state) => state.fetchAll);
   const fetchUnits = useUnitsStore((state) => state.fetchAll);
   const fetchReports = useReportStore((state) => state.fetchAll);
+  const fetchTasks = useTaskStore((state) => state.fetchAll);
   const fetchAppUsers = useAppUsersStore((state) => state.fetchAll);
   const syncSelf = useAppUsersStore((state) => state.syncSelf);
 
@@ -35,12 +37,13 @@ export function useSupabaseSync(isSignedIn: boolean) {
     void fetchInventory(supabase);
     void fetchUnits(supabase);
     void fetchReports(supabase);
+    void fetchTasks(supabase);
     // supabase is intentionally omitted: its identity is now stable per
     // component instance (see useSupabaseClient), and re-running this effect
     // should be driven only by sign-in state, not by an incidental client
     // reference change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSignedIn, fetchInventory, fetchUnits, fetchReports]);
+  }, [isSignedIn, fetchInventory, fetchUnits, fetchReports, fetchTasks]);
 
   // Read as primitives so the effect below is keyed on the values that
   // actually matter — Clerk's `user` object identity changes more often than

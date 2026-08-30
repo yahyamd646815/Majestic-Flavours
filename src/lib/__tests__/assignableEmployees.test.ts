@@ -3,7 +3,7 @@
 // than widening the whole project's tsconfig for one test file.
 /// <reference types="jest" />
 
-import { getAssignableEmployees } from "@/lib/assignableEmployees";
+import { getAssignableEmployees, getAssignableTaskParticipants } from "@/lib/assignableEmployees";
 import type { SyncedUser } from "@/store/appUsersStore";
 import type { AppUser } from "@/types/inventory";
 
@@ -72,5 +72,39 @@ describe("getAssignableEmployees", () => {
 
   it("returns an empty list when the roster has no employees", () => {
     expect(getAssignableEmployees(roster.slice(0, 2), [])).toEqual([]);
+  });
+});
+
+describe("getAssignableTaskParticipants", () => {
+  it("gives an admin creator the entire roster, including admins and managers", () => {
+    const result = getAssignableTaskParticipants("admin", "clerk_admin", roster, []);
+
+    expect(result.map((person) => person.id)).toEqual(["user-1", "user-2", "user-3", "user-4"]);
+  });
+
+  it("limits a manager creator to employees plus themselves", () => {
+    const result = getAssignableTaskParticipants(
+      "manager",
+      "clerk_manager",
+      roster,
+      [syncedUser("clerk_manager", "Roster Manager", "manager@example.com")],
+    );
+
+    expect(result.map((person) => person.id)).toEqual(["user-2", "user-3", "user-4"]);
+  });
+
+  it("excludes other managers and all admins for a manager creator", () => {
+    const result = getAssignableTaskParticipants(
+      "manager",
+      "clerk_someone_else",
+      roster,
+      [syncedUser("clerk_someone_else", "Someone Else", "someone-else@example.com")],
+    );
+
+    expect(result.map((person) => person.id)).toEqual(["user-3", "user-4"]);
+  });
+
+  it("returns an empty pool for any other creator role", () => {
+    expect(getAssignableTaskParticipants("employee", "clerk_amina", roster, [])).toEqual([]);
   });
 });
