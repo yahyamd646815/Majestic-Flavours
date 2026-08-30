@@ -109,6 +109,19 @@ export default function AppLayout() {
           }}
         />
         <Tabs.Screen
+          name="tasks"
+          options={{
+            title: "Tasks",
+            tabBarIcon: ({ color, size, focused }) => (
+              <Ionicons
+                name={focused ? "checkbox" : "checkbox-outline"}
+                color={color}
+                size={size}
+              />
+            ),
+          }}
+        />
+        <Tabs.Screen
           name="users"
           options={{
             title: "Users",

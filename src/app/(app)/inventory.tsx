@@ -454,7 +454,9 @@ export default function Inventory() {
       <BulkAssignModal
         key={`assign-${assignSession}`}
         visible={isAssignOpen}
-        itemCount={selectedCount}
+        selectedCount={selectedCount}
+        targetNoun="item"
+        employees={assignableEmployees}
         isAssigning={isAssigning}
         onClose={() => setIsAssignOpen(false)}
         onAssign={(clerkUserId) => void handleBulkAssign(clerkUserId)}
