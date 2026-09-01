@@ -27,6 +27,12 @@ export type InventoryItem = {
    * report ping writes it, and a quantity change clears it. Always read it
    * through `getEffectiveStatus` (@/lib/stockStatus), never directly. */
   statusOverride: StockStatus | null;
+  /** When this item's status-relevant information last changed — written by
+   * `updateItem` whenever `currentQuantity` or `statusOverride` is part of the
+   * update, so it covers pinged and quantity-derived statuses alike. The
+   * Dashboard's elapsed-time timer and its secondary recency sort read this;
+   * nothing else does. */
+  statusUpdatedAt: string;
   createdAt: string;
 };
 

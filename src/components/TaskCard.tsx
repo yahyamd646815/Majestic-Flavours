@@ -2,12 +2,19 @@ import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
 import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
+import { TaskReminderControl } from "@/components/TaskReminderControl";
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { getCategoryName } from "@/lib/inventoryLabels";
 import { formatDueDateTime } from "@/lib/reports";
 import { hasEmployeeResponded, isTaskFullyCompleted, isTaskOverdueForEmployee, isTaskPastDue } from "@/lib/tasks";
 import { useAppUsersStore } from "@/store/appUsersStore";
-import type { Task, TaskCategory, TaskCompletionStatus } from "@/types/tasks";
+import type {
+  ReminderOffsetUnit,
+  Task,
+  TaskCategory,
+  TaskCompletionStatus,
+  TaskReminder,
+} from "@/types/tasks";
 
 type TaskCardProps = {
   task: Task;
@@ -20,6 +27,21 @@ type TaskCardProps = {
    * only if they're actually assigned to it (which, since RLS already scopes
    * their `select` to assigned-only, is every task they can see). */
   currentUserClerkId: string | undefined;
+  /** "Now" for both overdue checks below, supplied by the caller's `useNowTick`
+   * rather than read here — the helpers' own `Date.now()` default is invisible
+   * to React, so the badge would never move on its own while the list sits
+   * open. */
+  nowMs: number;
+  /**
+   * The signed-in person's own reminders on this task — up to three, longest
+   * lead time first, empty when they have set none. Nobody else's is ever
+   * passed: `task_reminders` is personal, so a reminder has no meaning to
+   * anyone but its owner and Admin/Manager see nothing here on tasks they
+   * merely manage.
+   */
+  reminders: TaskReminder[];
+  onAddReminder: (offsetValue: number, offsetUnit: ReminderOffsetUnit) => void;
+  onRemoveReminder: (reminderId: string) => void;
   onRemoveAssignment: (employeeClerkId: string) => void;
   onComplete: (status: TaskCompletionStatus, note: string) => void;
   /** Rendered for Admin/Manager only — opens `TaskFormModal` in edit mode. */
@@ -45,6 +67,10 @@ export function TaskCard({
   categories,
   canManage,
   currentUserClerkId,
+  nowMs,
+  reminders,
+  onAddReminder,
+  onRemoveReminder,
   onRemoveAssignment,
   onComplete,
   onEdit,
@@ -64,9 +90,9 @@ export function TaskCard({
   // Two different questions, deliberately kept apart: the badge is about the
   // task ("past due, nobody has completed it"), the action button is about
   // this viewer ("past due and I still owe my own response").
-  const pastDue = isTaskPastDue(task);
+  const pastDue = isTaskPastDue(task, nowMs);
   const overdueForMe =
-    currentUserClerkId !== undefined && isTaskOverdueForEmployee(task, currentUserClerkId);
+    currentUserClerkId !== undefined && isTaskOverdueForEmployee(task, currentUserClerkId, nowMs);
   const isOpen = !isTaskFullyCompleted(task);
 
   // Paired with the id (unlike `getAssignedNames`, which only returns
@@ -100,6 +126,29 @@ export function TaskCard({
     currentUserClerkId !== undefined &&
     task.assignedEmployeeIds.includes(currentUserClerkId) &&
     !hasEmployeeResponded(task, currentUserClerkId);
+
+  /**
+   * A reminder is a purely personal preference, so the control is shown only
+   * to someone looking at a task they are genuinely assigned to — never to an
+   * Admin or Manager on a task they are merely managing, where it would carry
+   * no operational meaning. An Admin or Manager who assigned the task to
+   * themselves is on exactly the same footing as anyone else here, matching
+   * `canComplete` above and what `task_reminders_insert_own` actually permits.
+   *
+   * Withheld entirely once the task is completed or past due, rather than
+   * offered and then failing after the fact: a completed task has nothing left
+   * to be reminded about, and a past-due one has no instant left at which a
+   * reminder could fire. `pastDue` (`isTaskPastDue`) rather than `overdueForMe`
+   * covers the second — the two agree except once this person has submitted
+   * their own miss reason, where `isTaskOverdueForEmployee` goes false while
+   * the due time is just as gone.
+   */
+  const canSetReminder =
+    !selectionMode &&
+    currentUserClerkId !== undefined &&
+    task.assignedEmployeeIds.includes(currentUserClerkId) &&
+    isOpen &&
+    !pastDue;
 
   function handleRemoveAssignment(employeeClerkId: string) {
     if (task.assignedEmployeeIds.length === 1) {
@@ -252,6 +301,16 @@ export function TaskCard({
             </TouchableOpacity>
           )}
         </View>
+      ) : null}
+
+      {canSetReminder ? (
+        <TaskReminderControl
+          dueAt={task.dueAt}
+          nowMs={nowMs}
+          reminders={reminders}
+          onAdd={onAddReminder}
+          onRemove={onRemoveReminder}
+        />
       ) : null}
 
       {canManage && !selectionMode ? (

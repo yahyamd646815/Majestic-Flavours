@@ -108,6 +108,7 @@ const items: InventoryItem[] = [
     minThreshold: 5,
     assignedEmployeeIds: ["user-amir"],
     statusOverride: null,
+    statusUpdatedAt: "2026-01-04T09:00:00.000Z",
     createdAt: "2026-01-04T09:00:00.000Z",
   },
   {
@@ -119,6 +120,7 @@ const items: InventoryItem[] = [
     minThreshold: 3,
     assignedEmployeeIds: ["user-amir"],
     statusOverride: null,
+    statusUpdatedAt: "2026-01-04T09:00:00.000Z",
     createdAt: "2026-01-04T09:00:00.000Z",
   },
 ];
@@ -334,6 +336,7 @@ describe("buildReportExportHtml", () => {
         minThreshold: 1,
         assignedEmployeeIds: [],
         statusOverride: null,
+        statusUpdatedAt: "2026-01-04T09:00:00.000Z",
         createdAt: "2026-01-04T09:00:00.000Z",
       },
     ];
