@@ -50,6 +50,16 @@ module.exports = {
       "expo-file-system",
       "expo-localization",
       "expo-updates",
+      [
+        "expo-notifications",
+        {
+          // Android renders the status-bar icon as a flat silhouette, which is
+          // exactly what the adaptive monochrome icon already is — no separate
+          // asset needed. `color` tints it in the tray (brand gold).
+          icon: "./assets/images/android-icon-monochrome.png",
+          color: "#C8A44A",
+        },
+      ],
     ],
     experiments: {
       typedRoutes: true,

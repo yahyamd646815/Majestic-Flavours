@@ -341,7 +341,13 @@ Any destructive action (deleting an item or deleting a user) must trigger a two-
 - First popup: "Are you sure you want to delete this?" with Confirm and Cancel buttons
 - Second popup: "This action cannot be undone. Type DELETE to confirm." — deletion only proceeds if the user types the word DELETE exactly
 
-Never skip or shortcut this flow for any delete action.
+Never skip or shortcut this flow for any delete action that destroys real business data.
+
+**This rule is about destroying real data an item or a user actually holds — it does not automatically extend to every action that happens to remove something.** Two confirmed exceptions, both deliberate, not oversights:
+- **Removing one person's assignment** from an item or a task (a single chip, not the whole record) — reversible by reassigning, and only warns when it would leave zero assignees. Matches this exact behavior across both Inventory and Tasks.
+- **Deleting a category** — structurally can't happen at all while anything still references it, so by the time deletion is reachable there's nothing left to lose. A simple confirm is enough; this has been Settings' own established pattern for inventory categories from early in the project, mirrored deliberately for task categories.
+
+If a new kind of delete action doesn't clearly destroy real, irreplaceable data the way an item or a user does, that's worth a genuine judgment call — not an automatic escalation to the full typed-DELETE flow just because the action is technically "delete."
 
 ---
 
@@ -352,7 +358,7 @@ Never skip or shortcut this flow for any delete action.
 - Admin/Manager can only complete or miss-report a task they are genuinely assigned to (enforced by RLS, mirrored client-side to fail fast). The fix for "an admin/manager accidentally needs to resolve something they weren't assigned to" is deleting the task, not a special completion override.
 - Task deletion: Admin can delete any task. Manager can delete only tasks they created themselves — a narrow carve-out from Manager's usual no-deletion baseline everywhere else in this app, not a general new deletion right.
 - Assignable pool depends on who's creating the task, not a single shared list: Admin can assign to employees, themselves, other admins, and managers. Manager can assign to employees and themselves only. Use `getAssignableTaskParticipants`, not `getAssignableEmployees` (which stays employee-only, still correct for Inventory).
-- Recurrence (data model, occurrence generation, and the calendar UI for building/previewing it) lands in later prompts — as of the foundation work, `tasks` covers one-time tasks only. Don't assume recurrence fields exist on `tasks` until those prompts land.
+- **Recurrence is built** (`v2-03-b`): `task_recurrence_rules`/`task_recurrence_assignments` hold the template — never a hidden row in `tasks` — and `generateDueOccurrences` in `lib/taskRecurrence.ts` is the single source of truth for turning a rule into concrete occurrences. Each occurrence is an ordinary `tasks` row (`generated_from_recurrence_rule_id` + `recurrence_occurrence_key` link it back), reusing all existing task machinery unchanged. Generation itself is client-side, once per session, scoped per device to rules it can actually verify against (see `useTaskOccurrenceGeneration`) — an employee's device only ever generates rules they're personally assigned to, not the whole set. Still not built: the calendar-based custom date picker, the occurrence preview, and editing a rule's assignees after creation.
 - The employee/"Unassigned" filter on the to-do list reuses the same asymmetric logic as Inventory's (`matchesEmployeeFilter` in `lib/inventoryFilters.ts`) — combining a real employee with "Unassigned" means *not assigned to that employee*, not "assigned to nobody."
 
 ---
@@ -450,6 +456,8 @@ Fix all errors. No `any` in TypeScript.
 ## Communication Style
 
 Be concise. Explain what changed and how to test it.
+
+End every summary with a separate list, headed **Files changed**, of every file created or modified during this prompt — full paths only, one per line, no prose mixed in. This is distinct from the summary above it, not a repeat of it: Yahya uses this list specifically to know which files to upload for review afterward, and having to extract that from prose across a long summary defeats the purpose. Include every touched file, even ones only mentioned in passing (a config file, a test file, a deleted temporary file) — an incomplete list is worse than a long one.
 
 ---
 

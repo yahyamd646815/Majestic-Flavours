@@ -1,20 +1,49 @@
 import type { InventoryItem, Report } from "@/types/inventory";
 
 /**
- * Local calendar date as `YYYY-MM-DD`, computed for Riyadh specifically —
- * not the device's own timezone. Riyadh has a fixed UTC+3 offset with no
+ * The Riyadh wall-clock date and time of an instant, as plain numbers —
+ * 1-indexed month, matching both how `YYYY-MM-DD` strings read and what
+ * `riyadhDateTimeToIso` takes back. Riyadh has a fixed UTC+3 offset with no
  * DST, so plain UTC arithmetic is both simpler and more reliable than
  * Intl.DateTimeFormat with a timeZone option, which has real documented
  * cross-platform inconsistencies in Hermes (React Native's JS engine).
- * This also means the app's notion of "today" no longer depends on a test
- * device's timezone being set correctly at all.
+ *
+ * This is the shared core of `getTodayIsoDate` below, exposed separately for
+ * callers that need the time components too (see `lib/taskRecurrence.ts`) —
+ * so the app has exactly one place where an instant becomes Riyadh digits.
+ */
+export function getRiyadhParts(instantMs: number): {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+} {
+  const riyadh = new Date(instantMs + 3 * 60 * 60 * 1000);
+  return {
+    year: riyadh.getUTCFullYear(),
+    month: riyadh.getUTCMonth() + 1,
+    day: riyadh.getUTCDate(),
+    hour: riyadh.getUTCHours(),
+    minute: riyadh.getUTCMinutes(),
+  };
+}
+
+/** `YYYY-MM-DD` for any instant's Riyadh calendar date — the general form of
+ * `getTodayIsoDate` below, for callers that need a date other than "now"
+ * (e.g. bucketing a task's `dueAt` into a day for `matchesDateFilter`). */
+export function getRiyadhIsoDate(instantMs: number): string {
+  const { year, month, day } = getRiyadhParts(instantMs);
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/**
+ * Local calendar date as `YYYY-MM-DD`, computed for Riyadh specifically —
+ * not the device's own timezone. This means the app's notion of "today" does
+ * not depend on a test device's timezone being set correctly at all.
  */
 export function getTodayIsoDate(): string {
-  const now = new Date();
-  const riyadh = new Date(now.getTime() + 3 * 60 * 60 * 1000);
-  const month = String(riyadh.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(riyadh.getUTCDate()).padStart(2, "0");
-  return `${riyadh.getUTCFullYear()}-${month}-${day}`;
+  return getRiyadhIsoDate(Date.now());
 }
 
 /**

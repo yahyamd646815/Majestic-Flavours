@@ -10,6 +10,9 @@ import { DraftReportProvider } from "@/context/DraftReportContext";
 import { useAnalyticsIdentify } from "@/hooks/useAnalyticsIdentify";
 import { useReportCleanup } from "@/hooks/useReportCleanup";
 import { useSupabaseSync } from "@/hooks/useSupabaseSync";
+import { useTaskOccurrenceGeneration } from "@/hooks/useTaskOccurrenceGeneration";
+import { useTaskRecordCleanup } from "@/hooks/useTaskRecordCleanup";
+import { useTaskReminderSync } from "@/hooks/useTaskReminderSync";
 import { parseRole } from "@/types/role";
 
 const styles = StyleSheet.create({
@@ -40,6 +43,25 @@ export default function AppLayout() {
   // Rules). Admin-only and silent; same placement, above the early returns,
   // for the same rules-of-hooks reason.
   useReportCleanup(isSignedIn === true);
+
+  // Creates any recurring-task occurrences that have come due since the app
+  // was last opened — from whichever device gets here first, employees
+  // included. Waits on the recurrence rules loaded just above; same
+  // placement and rules-of-hooks reason as the others.
+  useTaskOccurrenceGeneration(isSignedIn === true);
+
+  // Drops tasks past the 4-month retention window (AGENTS.md → To-Do List
+  // Rules / Records page). Admin-only and silent, mirroring
+  // `useReportCleanup`. Same placement and rules-of-hooks reason as the
+  // others.
+  useTaskRecordCleanup(isSignedIn === true);
+
+  // Rebuilds this device's scheduled task reminders from the stored
+  // preferences — the OS-level notifications do not survive a restart, so
+  // they are re-derived rather than assumed. Waits on the tasks and reminders
+  // loaded by `useSupabaseSync`; same placement and rules-of-hooks reason as
+  // the others.
+  useTaskReminderSync(isSignedIn === true);
 
   // Identifies this person to PostHog and captures `user_signed_in`, once per
   // session. Same placement and same rules-of-hooks reason as the two above.
@@ -119,6 +141,13 @@ export default function AppLayout() {
                 size={size}
               />
             ),
+          }}
+        />
+        <Tabs.Screen
+          name="records"
+          options={{
+            title: "Records",
+            href: null,
           }}
         />
         <Tabs.Screen

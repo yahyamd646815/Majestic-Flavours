@@ -30,7 +30,9 @@ import { parseRole } from "@/types/role";
 
 // A string union (not a boolean) so a third "by status" mode, once the ping
 // feature ships, is just another value — not a redesign of the toggle.
-type InventorySortMode = "default" | "alphabetical";
+// "recent" replaced the old "default" mode (which was simply whatever order
+// Supabase returned) and matches Tasks' own Recently Added / A–Z pair.
+type InventorySortMode = "recent" | "alphabetical";
 
 export default function Inventory() {
   const { user } = useUser();
@@ -66,7 +68,7 @@ export default function Inventory() {
   // fields reset from scratch instead of carrying over the previous session.
   const [formSession, setFormSession] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortMode, setSortMode] = useState<InventorySortMode>("default");
+  const [sortMode, setSortMode] = useState<InventorySortMode>("recent");
 
   const appUsers = useAppUsersStore((state) => state.users);
   const assignableEmployees = useMemo(
@@ -101,10 +103,15 @@ export default function Inventory() {
     });
   }, [items, selectedCategoryIds, searchQuery, selectedEmployeeIds]);
 
-  const sortedItems = useMemo(() => {
-    if (sortMode !== "alphabetical") return filteredItems;
-    return [...filteredItems].sort((a, b) => a.name.localeCompare(b.name));
-  }, [filteredItems, sortMode]);
+  const sortedItems = useMemo(
+    () =>
+      [...filteredItems].sort((a, b) =>
+        sortMode === "alphabetical"
+          ? a.name.localeCompare(b.name)
+          : b.createdAt.localeCompare(a.createdAt),
+      ),
+    [filteredItems, sortMode],
+  );
 
   // Admin and Manager both, matching what individual item editing already
   // allows — bulk assignment is not an Admin-only action.
@@ -348,7 +355,7 @@ export default function Inventory() {
             <SortToggle
               label="Sort"
               options={[
-                { value: "default", label: "Default" },
+                { value: "recent", label: "Recently Added" },
                 { value: "alphabetical", label: "A–Z" },
               ]}
               value={sortMode}
