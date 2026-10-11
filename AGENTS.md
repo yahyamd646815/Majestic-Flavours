@@ -21,7 +21,9 @@ Core features:
 - Automatic report deletion after 4 months
 - Two-step DELETE confirmation for all destructive actions (first popup confirms intent, second requires typing DELETE exactly)
 
-This is a private app, not publicly listed. Users access it via a private link or PWA install on their phone.
+This is a private app, not publicly listed. Staff install it as an APK built with EAS (the `preview` profile) — it is not in any app store.
+
+**Scope:** this repo is the internal inventory and to-do-list app only. The restaurant's planned billing/table-management app and customer delivery/loyalty app are separate projects in separate repos. Don't add billing, reservations, customer accounts, or anything customer-facing here — if a request seems to need that, stop and flag it.
 
 ---
 
@@ -38,6 +40,9 @@ This is a private app, not publicly listed. Users access it via a private link o
 - `expo-updates` — OTA delivery of JS-only changes to the `preview` build (added after v1; native changes still require a full rebuild regardless)
 - Jest + `jest-expo` — test infrastructure (added after v1; not yet covering the whole codebase, only specific modules as tests are written for them)
 - EAS Build — distribution, via `development` and `preview` profiles (`preview` is what real staff actually run)
+- `expo-notifications` — local task reminders and remote push (native module: any change to its config needs a full rebuild of both profiles)
+- Firebase Cloud Messaging — Android push transport only (no other Firebase features are used). Wired via `google-services.json` at the repo root, guarded in `app.config.js`
+- Supabase Edge Functions + `pg_net` — server-side push sending (`notify-task-assignment`, called from a database trigger)
 
 Do not introduce new major libraries unless there is a strong reason. Ask before installing anything new.
 
@@ -358,8 +363,18 @@ If a new kind of delete action doesn't clearly destroy real, irreplaceable data 
 - Admin/Manager can only complete or miss-report a task they are genuinely assigned to (enforced by RLS, mirrored client-side to fail fast). The fix for "an admin/manager accidentally needs to resolve something they weren't assigned to" is deleting the task, not a special completion override.
 - Task deletion: Admin can delete any task. Manager can delete only tasks they created themselves — a narrow carve-out from Manager's usual no-deletion baseline everywhere else in this app, not a general new deletion right.
 - Assignable pool depends on who's creating the task, not a single shared list: Admin can assign to employees, themselves, other admins, and managers. Manager can assign to employees and themselves only. Use `getAssignableTaskParticipants`, not `getAssignableEmployees` (which stays employee-only, still correct for Inventory).
-- **Recurrence is built** (`v2-03-b`): `task_recurrence_rules`/`task_recurrence_assignments` hold the template — never a hidden row in `tasks` — and `generateDueOccurrences` in `lib/taskRecurrence.ts` is the single source of truth for turning a rule into concrete occurrences. Each occurrence is an ordinary `tasks` row (`generated_from_recurrence_rule_id` + `recurrence_occurrence_key` link it back), reusing all existing task machinery unchanged. Generation itself is client-side, once per session, scoped per device to rules it can actually verify against (see `useTaskOccurrenceGeneration`) — an employee's device only ever generates rules they're personally assigned to, not the whole set. Still not built: the calendar-based custom date picker, the occurrence preview, and editing a rule's assignees after creation.
+- **Recurrence is built** (`v2-03-b`): `task_recurrence_rules`/`task_recurrence_assignments` hold the template — never a hidden row in `tasks` — and `generateDueOccurrences` in `lib/taskRecurrence.ts` is the single source of truth for turning a rule into concrete occurrences. Each occurrence is an ordinary `tasks` row (`generated_from_recurrence_rule_id` + `recurrence_occurrence_key` link it back), reusing all existing task machinery unchanged. Generation itself is client-side, once per session, scoped per device to rules it can actually verify against (see `useTaskOccurrenceGeneration`) — an employee's device only ever generates rules they're personally assigned to, not the whole set. Custom dates (`task_recurrence_custom_dates`), the calendar date picker (`RecurrenceDatePickerModal`), and the occurrence preview (`RecurrenceOccurrencePreview`) are built. Still not built: editing a rule's assignees after creation.
 - The employee/"Unassigned" filter on the to-do list reuses the same asymmetric logic as Inventory's (`matchesEmployeeFilter` in `lib/inventoryFilters.ts`) — combining a real employee with "Unassigned" means *not assigned to that employee*, not "assigned to nobody."
+
+---
+
+## Notification Rules
+
+- **Local reminders** (`task_reminders`, `taskReminderStore`, `useTaskReminderSync`): an employee can set up to 3 per task they're assigned to. The limit is enforced client-side only, by design. Each scheduled notification's identifier is derived from the reminder's own id, so reminders on the same task never overwrite each other. Scheduled notifications are device-local and ephemeral — they are re-derived from Supabase at every session start, never assumed to still exist.
+- Session-start reconciliation must **never** show a permission prompt (use `hasNotificationPermission`). Prompting happens only when someone actively sets a reminder, or at sign-in for push.
+- Reminders are not offered on a task that is completed or already overdue for the viewer.
+- **Any change to a task's `due_at` must go through the code path that reschedules its reminders** — editing, and any future action that moves a due time (e.g. delaying a task). Don't write `due_at` from a new place without rescheduling.
+- **Push:** the device token is written to `app_users.expo_push_token` at sign-in (`registerPushToken`). Pushes are sent by the `notify-task-assignment` Edge Function, called by an `AFTER INSERT` trigger on `task_assignments`. Recurrence-generated occurrences are deliberately skipped. The trigger must never be able to roll back the assignment it fired on, and the function must reject any caller without the shared-secret header.
 
 ---
 
@@ -385,6 +400,11 @@ Use Supabase Row Level Security policies to enforce role-based access at the dat
 **Auth integration:** this project uses Clerk's native third-party auth integration with Supabase (an `accessToken` function passed to the Supabase client) — **not** the JWT template method. The JWT template approach is deprecated; do not reintroduce it, even if older documentation or examples suggest it. RLS policies read the role via `current_user_role()`, which reads `auth.jwt()->'metadata'->>'role'`.
 
 Every RLS change (new policy, new table, changed permission) is genuinely high-stakes — verify the exact behavior before assuming it, and prefer an explicit test over an assumption. A cascade delete needs RLS permission on every child table it touches, not just the parent; this has caused real bugs before.
+
+- Never write an RLS policy that queries its own table — it causes `42P17 infinite recursion`. Use a `security definer` helper in the `internal` schema instead, with every table reference schema-qualified and `search_path` set (see the existing `internal.task_completions_task_already_completed`).
+- An UPDATE that RLS silently filters out returns no error. If the code needs to know the write actually landed, select the affected rows back and check the count.
+
+**Platform prerequisites:** if a feature depends on anything outside the code — a Postgres extension, a Vault secret, an Edge Function secret, a third-party credential — list each one in your summary under a heading **Prerequisites to verify**, with the exact check Yahya can run. Never assume one is already configured. (Push notifications shipped assuming `pg_net`, three Vault secrets, and Firebase were all set up; none were.)
 
 ---
 
@@ -450,6 +470,8 @@ npm run test
 ```
 
 Fix all errors. No `any` in TypeScript.
+
+**Any prompt that adds, removes, or changes a dependency must also run `npm ci` (not just `npm install`) before finishing, and commit the resulting `package-lock.json`.** `npm install` can leave a lock file that looks fine locally but is subtly out of sync — `npm ci` is what EAS's own build servers actually run, and it fails loudly on exactly this class of drift. This has already caused real EAS build failures more than once in this project (most recently after `expo-notifications` was added) — catching it here, in the same session that changed the dependency, is far cheaper than tracing it back from a failed build later. A green `npm ci` locally with no lock file changes left uncommitted is the actual bar, not "the app started fine."
 
 ---
 

@@ -70,6 +70,35 @@ export async function hasNotificationPermission(): Promise<boolean> {
 }
 
 /**
+ * How a permission request actually ended.
+ *
+ * A plain `false` cannot tell "they said no" apart from "the OS will not ask
+ * again" apart from "this is the web build" — and those need completely
+ * different things from the person. Push registration logs which one it hit,
+ * because a null token with no explanation is exactly what made this
+ * undiagnosable the first time round.
+ */
+export type PermissionOutcome = "granted" | "denied" | "blocked" | "unsupported" | "error";
+
+async function resolveNotificationPermission(): Promise<PermissionOutcome> {
+  if (!isSupported) return "unsupported";
+  try {
+    const current = await Notifications.getPermissionsAsync();
+    if (current.granted) return "granted";
+    // Already refused in a way the OS will not re-prompt for: Android stops
+    // showing the dialog after a refusal, so a later call silently returns
+    // the same "not granted" it did the first time.
+    if (!current.canAskAgain) return "blocked";
+    const requested = await Notifications.requestPermissionsAsync();
+    if (requested.granted) return "granted";
+    return requested.canAskAgain ? "denied" : "blocked";
+  } catch (error) {
+    console.warn("[notifications] Could not request the notification permission:", error);
+    return "error";
+  }
+}
+
+/**
  * Allowed already, or allowed after asking. Requested lazily — the first time
  * somebody actually sets a reminder — so the prompt arrives with a reason
  * attached instead of on sign-in, and staff who never use reminders are never
@@ -81,17 +110,7 @@ export async function hasNotificationPermission(): Promise<boolean> {
  * permission is granted, with no re-setting needed.
  */
 export async function ensureNotificationPermission(): Promise<boolean> {
-  if (!isSupported) return false;
-  try {
-    const current = await Notifications.getPermissionsAsync();
-    if (current.granted) return true;
-    if (!current.canAskAgain) return false;
-    const requested = await Notifications.requestPermissionsAsync();
-    return requested.granted;
-  } catch (error) {
-    console.warn("[notifications] Could not request the notification permission:", error);
-    return false;
-  }
+  return (await resolveNotificationPermission()) === "granted";
 }
 
 /** The EAS project this build belongs to, read from the embedded config
@@ -108,34 +127,64 @@ function readEasProjectId(): string | null {
   return typeof projectId === "string" && projectId.length > 0 ? projectId : null;
 }
 
+/** An error's own `code`, where it has one — `expo-notifications` rejects with
+ * coded errors (`E_REGISTRATION_FAILED` and friends) whose code is the part
+ * worth reading in a build log. Read through `unknown` to keep `any` out. */
+function describeTokenError(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const code: unknown = (error as { code?: unknown }).code;
+  return typeof code === "string" ? `${code}: ${error.message}` : error.message;
+}
+
 /**
- * This device's Expo push token, or null if push cannot reach it.
+ * The outcome of asking this device for a push token — the token itself, or
+ * which of the several ordinary "no push here" cases it ran into.
+ *
+ * Deliberately not `string | null`: every one of these ends the same way for
+ * the person (no push), but they mean entirely different things to whoever is
+ * debugging it. A missing `google-services.json` (Android push runs over FCM,
+ * so without it `getExpoPushTokenAsync` throws before it reaches Expo's
+ * servers at all) looks identical to a refused permission if both collapse to
+ * null — and that is precisely the confusion this feature shipped with.
+ */
+export type PushTokenResult =
+  | { status: "ok"; token: string }
+  | { status: "unsupported" }
+  | { status: "no-permission"; permission: PermissionOutcome }
+  | { status: "failed"; reason: string };
+
+/**
+ * This device's Expo push token, or why there isn't one.
  *
  * Unlike the local reminders above, the permission is requested at sign-in
  * rather than lazily: being told somebody handed you a task matters to every
  * member of staff, and the moment worth attaching the ask to — the assigning
- * — happens on somebody else's device entirely. `ensureNotificationPermission`
+ * — happens on somebody else's device entirely. The permission check
  * short-circuits when it has already been granted, so asking here as well as
  * there costs nothing.
- *
- * Null covers every "no push here" case — web, a refusal, a device with no
- * Play Services, a build with no push credentials. All of them are ordinary,
- * and all of them end the same way: no token stored, and the assignment
- * webhook silently sends nothing.
  */
-export async function getExpoPushToken(): Promise<string | null> {
-  if (!isSupported) return null;
-  if (!(await ensureNotificationPermission())) return null;
+export async function getExpoPushToken(): Promise<PushTokenResult> {
+  if (!isSupported) return { status: "unsupported" };
 
+  const permission = await resolveNotificationPermission();
+  if (permission !== "granted") return { status: "no-permission", permission };
+
+  // Outside Expo Go this cannot be inferred dependably, and without it the
+  // call cannot succeed — so treat its absence as the failure it is rather
+  // than passing `undefined` and getting a vaguer error one step later.
   const projectId = readEasProjectId();
+  if (!projectId) {
+    return {
+      status: "failed",
+      reason: "No EAS projectId in the embedded config (app.config.js → extra.eas.projectId).",
+    };
+  }
+
   try {
-    const { data } = await Notifications.getExpoPushTokenAsync(
-      projectId ? { projectId } : undefined,
-    );
-    return data;
+    const { data } = await Notifications.getExpoPushTokenAsync({ projectId });
+    return { status: "ok", token: data };
   } catch (error) {
-    console.warn("[notifications] Could not read this device's push token:", error);
-    return null;
+    return { status: "failed", reason: describeTokenError(error) };
   }
 }
 

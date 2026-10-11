@@ -835,6 +835,28 @@ describe("buildRecurrencePreview", () => {
     expect(result.occurrences[1].occurrenceKey).toBe("2026-09-01T01:00");
   });
 
+  it("treats a rule ending after exactly the cap's worth of times as complete, not cut off", () => {
+    // 1000 is both MAX_ENDS_AFTER_OCCURRENCES and the preview's own cap, so
+    // this rule stops at the cap because it is finished — the one boundary
+    // where "hit the cap" and "was truncated" are not the same thing.
+    const result = buildRecurrencePreview(
+      draft({
+        timePattern: "interval",
+        timesOfDay: [],
+        hourIntervalText: "1",
+        endMode: "after",
+        endsAfterText: "1000",
+      }),
+      TODAY,
+      NOW_MS,
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.occurrences).toHaveLength(1000);
+    expect(result.isTruncated).toBe(false);
+  });
+
   it("does not mark an ordinary rule as truncated", () => {
     const result = buildRecurrencePreview(draft({ endsAfterText: "3" }), TODAY, NOW_MS);
     expect(result).toEqual({ ok: true, isTruncated: false, occurrences: expect.any(Array) });

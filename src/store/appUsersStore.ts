@@ -77,11 +77,27 @@ export const useAppUsersStore = create<AppUsersState>()((set) => ({
   },
 
   registerPushToken: async (supabase, clerkUserId) => {
-    const token = await getExpoPushToken();
-    // No permission, no push credentials, or the web build — all ordinary.
-    // Leaving the column as it is beats writing a null over a token another
-    // of this person's devices registered.
-    if (!token) return;
+    const result = await getExpoPushToken();
+
+    // Each of these leaves the column exactly as it was — better than writing
+    // a null over a token another of this person's devices registered. They
+    // are all ordinary outcomes, but they are not the same outcome, so each
+    // one says which it was: a token that never appears in the database is
+    // otherwise indistinguishable from a token that was never asked for.
+    if (result.status === "unsupported") {
+      console.warn("[appUsersStore] No push token: not a native build.");
+      return;
+    }
+    if (result.status === "no-permission") {
+      console.warn(
+        `[appUsersStore] No push token for ${clerkUserId}: notification permission is "${result.permission}".`,
+      );
+      return;
+    }
+    if (result.status === "failed") {
+      console.warn(`[appUsersStore] No push token for ${clerkUserId}: ${result.reason}`);
+      return;
+    }
 
     // An UPDATE rather than an upsert: `syncSelf` owns creating the row (and
     // its NOT NULL name/email), and this only ever runs once that has
@@ -89,14 +105,27 @@ export const useAppUsersStore = create<AppUsersState>()((set) => ({
     // row-level and places no restriction on which columns are written.
     //
     // Nothing in state changes — no screen reads the token, only the
-    // database-side webhook does.
-    const { error } = await supabase
+    // database-side webhook does. The `select` is purely diagnostic: an
+    // UPDATE that RLS filters out is not an error, it simply matches nothing,
+    // so without counting the rows back a rejected write looks exactly like a
+    // successful one.
+    const { data, error } = await supabase
       .from("app_users")
-      .update({ expo_push_token: token })
-      .eq("clerk_user_id", clerkUserId);
+      .update({ expo_push_token: result.token })
+      .eq("clerk_user_id", clerkUserId)
+      .select("clerk_user_id");
 
     if (error) {
       console.warn("[appUsersStore] Failed to register this device for push:", error);
+      return;
     }
+    if ((data ?? []).length === 0) {
+      console.warn(
+        `[appUsersStore] Push token not stored: the update matched no row for ${clerkUserId}. Either their app_users row is missing, or "app_users_update_self" rejected the write.`,
+      );
+      return;
+    }
+
+    console.log(`[appUsersStore] Push token registered for ${clerkUserId}.`);
   },
 }));
