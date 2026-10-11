@@ -45,6 +45,17 @@ export type Task = {
    * (see `deleteTask`): no further occurrences are ever generated from it.
    */
   generatedFromRecurrenceRuleId: string | null;
+  /**
+   * Delay bookkeeping, written only by the `delay_task` RPC and set together
+   * or not at all (the `tasks_delay_fields_together` check constraint).
+   * `delayedAt` being non-null IS "this task has been delayed" — a task can be
+   * delayed once. `dueAt` already holds the new due time; `originalDueAt` is
+   * what it was before. Editing a task never touches these.
+   */
+  originalDueAt: string | null;
+  delayedAt: string | null;
+  /** Clerk id of the assignee who pressed Delay. */
+  delayedBy: string | null;
   assignedEmployeeIds: string[];
   /**
    * One entry per person who has responded so far; empty until anyone has.

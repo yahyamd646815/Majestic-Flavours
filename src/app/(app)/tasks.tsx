@@ -92,6 +92,7 @@ export default function Tasks() {
   const addAssignment = useTaskStore((state) => state.addAssignment);
   const removeAssignment = useTaskStore((state) => state.removeAssignment);
   const completeTask = useTaskStore((state) => state.completeTask);
+  const delayTask = useTaskStore((state) => state.delayTask);
   const deleteTask = useTaskStore((state) => state.deleteTask);
   const addRecurrenceRule = useTaskRecurrenceStore((state) => state.addRule);
 
@@ -419,6 +420,13 @@ export default function Tasks() {
     }
   }
 
+  // Reached only after TaskCard's own confirmation. The store has already
+  // logged the real error; the message here is the friendly version of it.
+  async function handleDelay(taskId: string) {
+    const result = await delayTask(supabase, taskId);
+    if (!result.ok) Alert.alert("Could not delay task", result.message);
+  }
+
   async function handleAddReminder(
     task: Task,
     offsetValue: number,
@@ -682,6 +690,7 @@ export default function Tasks() {
                     void handleRemoveAssignment(item.id, employeeClerkId)
                   }
                   onComplete={(status, note) => void handleComplete(item.id, status, note)}
+                  onDelay={() => handleDelay(item.id)}
                   onEdit={() => openEditTaskForm(item.id)}
                   canDelete={canDeleteTask(item)}
                   onDelete={() => setDeleteTarget(item)}

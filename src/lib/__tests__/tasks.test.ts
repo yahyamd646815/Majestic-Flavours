@@ -1,10 +1,15 @@
 /// <reference types="jest" />
 
-import { getTodayIsoDate } from "@/lib/reports";
+import { formatReportDate, getEndOfDayRiyadhIso, getTodayIsoDate } from "@/lib/reports";
 import {
+  DELAY_FALLBACK_MESSAGE,
+  canDelayTask,
   dueAtRiyadhIsoDate,
   dueAtToDatePickerValue,
   dueAtToTimePickerValue,
+  formatDelayTargetLabel,
+  getDelayErrorMessage,
+  getDelayedDueAt,
   hasEmployeeResponded,
   isTaskFullyCompleted,
   isTaskOverdueForEmployee,
@@ -310,5 +315,159 @@ describe("matchesTaskDateFilter", () => {
       expect(matchesTaskDateFilter("2026-12-31", "month", "2026-12-05")).toBe(true);
       expect(matchesTaskDateFilter("2027-01-01", "month", "2026-12-05")).toBe(false);
     });
+  });
+});
+
+describe("canDelayTask", () => {
+  const ME = "user_me";
+  const NOW = Date.parse("2026-09-20T08:00:00.000Z");
+  const LATER = "2026-09-20T11:00:00.000Z";
+
+  function delayable(
+    overrides: Partial<Parameters<typeof canDelayTask>[0]> = {},
+  ): Parameters<typeof canDelayTask>[0] {
+    return {
+      dueAt: LATER,
+      completions: [],
+      assignedEmployeeIds: [ME],
+      delayedAt: null,
+      ...overrides,
+    };
+  }
+
+  it("is true for an assignee on an open, not-yet-due, never-delayed task", () => {
+    expect(canDelayTask(delayable(), ME, NOW)).toBe(true);
+  });
+
+  it("is false for someone who is not assigned, whatever their role", () => {
+    expect(canDelayTask(delayable(), "user_other", NOW)).toBe(false);
+    expect(canDelayTask(delayable({ assignedEmployeeIds: [] }), ME, NOW)).toBe(false);
+  });
+
+  it("is false once anyone has completed it", () => {
+    const task = delayable({ completions: [completion("user_other", "completed")] });
+    expect(canDelayTask(task, ME, NOW)).toBe(false);
+  });
+
+  it("is false once it has already been delayed — one delay per task", () => {
+    expect(canDelayTask(delayable({ delayedAt: "2026-09-19T08:00:00.000Z" }), ME, NOW)).toBe(
+      false,
+    );
+  });
+
+  it("is false once overdue", () => {
+    expect(canDelayTask(delayable(), ME, Date.parse("2026-09-20T12:00:00.000Z"))).toBe(false);
+  });
+
+  it("treats a task due this exact instant as overdue, like the RPC's due_at <= now()", () => {
+    expect(canDelayTask(delayable(), ME, Date.parse(LATER))).toBe(false);
+    expect(canDelayTask(delayable(), ME, Date.parse(LATER) - 1)).toBe(true);
+  });
+
+  it("is false for an unparseable due time", () => {
+    expect(canDelayTask(delayable({ dueAt: "not-a-date" }), ME, NOW)).toBe(false);
+  });
+});
+
+describe("getDelayedDueAt", () => {
+  // Riyadh is UTC+3. These five cases are the same ones the SQL patch's own
+  // verification queries use, so the TypeScript mirror and `internal.delayed_due_at`
+  // are held to identical answers.
+  it.each([
+    ["14:00 Riyadh → 23:59 the same day", "2026-09-20T11:00:00.000Z", "2026-09-20T20:59:00.000Z"],
+    ["19:59 Riyadh → 23:59 the same day", "2026-09-20T16:59:00.000Z", "2026-09-20T20:59:00.000Z"],
+    ["20:00 Riyadh → 10:00 the next day", "2026-09-20T17:00:00.000Z", "2026-09-21T07:00:00.000Z"],
+    ["23:59 Riyadh → 10:00 the next day", "2026-09-20T20:59:00.000Z", "2026-09-21T07:00:00.000Z"],
+    [
+      "00:30 Riyadh on the 21st → 23:59 on the 21st",
+      "2026-09-20T21:30:00.000Z",
+      "2026-09-21T20:59:00.000Z",
+    ],
+  ])("%s", (_label, dueAt, expected) => {
+    expect(getDelayedDueAt(dueAt)).toBe(expected);
+  });
+
+  it("treats 19:59:59 as still before the 20:00 cutoff, like SQL's time < '20:00'", () => {
+    expect(getDelayedDueAt("2026-09-20T16:59:59.000Z")).toBe("2026-09-20T20:59:00.000Z");
+  });
+
+  it("rolls the 'next day' over a month end", () => {
+    // 20:30 Riyadh on 30 Sep → 10:00 on 1 Oct.
+    expect(getDelayedDueAt("2026-09-30T17:30:00.000Z")).toBe("2026-10-01T07:00:00.000Z");
+  });
+
+  it("rolls the 'next day' over a year end", () => {
+    expect(getDelayedDueAt("2026-12-31T18:00:00.000Z")).toBe("2027-01-01T07:00:00.000Z");
+  });
+
+  it("always lands strictly after the current due time", () => {
+    for (let hour = 0; hour < 24; hour += 1) {
+      const dueAt = new Date(Date.UTC(2026, 8, 20, hour, 0, 0)).toISOString();
+      const delayed = getDelayedDueAt(dueAt);
+      expect(delayed).not.toBeNull();
+      expect(Date.parse(delayed!)).toBeGreaterThan(Date.parse(dueAt));
+    }
+  });
+
+  it("returns null for an unparseable timestamp", () => {
+    expect(getDelayedDueAt("not-a-date")).toBeNull();
+  });
+
+  it("agrees with the app's own end of day, which is exactly 23:59:00.000 like the SQL", () => {
+    // If `getEndOfDayRiyadhIso` ever grew seconds or milliseconds, the SQL's
+    // flat 23:59:00 would silently disagree with it.
+    expect(getEndOfDayRiyadhIso("2026-09-20")).toBe("2026-09-20T20:59:00.000Z");
+    expect(getDelayedDueAt("2026-09-20T11:00:00.000Z")).toBe(getEndOfDayRiyadhIso("2026-09-20"));
+  });
+});
+
+describe("formatDelayTargetLabel", () => {
+  // Riyadh noon on 20 Sep 2026.
+  const NOW = Date.parse("2026-09-20T09:00:00.000Z");
+
+  it("says 'today' for 23:59 on Riyadh's current date", () => {
+    expect(formatDelayTargetLabel("2026-09-20T20:59:00.000Z", NOW)).toBe("11:59 PM today");
+  });
+
+  it("says 'tomorrow' for 10:00 on the next Riyadh date", () => {
+    expect(formatDelayTargetLabel("2026-09-21T07:00:00.000Z", NOW)).toBe("10:00 AM tomorrow");
+  });
+
+  it("names the date when the task is due further out than tomorrow", () => {
+    // The date half is `formatReportDate`'s, whose month abbreviation depends
+    // on the runtime's `en-GB` data ("Sep" vs "Sept") — so it is derived, not
+    // hardcoded.
+    expect(formatDelayTargetLabel("2026-09-25T20:59:00.000Z", NOW)).toBe(
+      `11:59 PM on ${formatReportDate("2026-09-25")}`,
+    );
+  });
+
+  it("measures 'today' by Riyadh's date, not UTC's", () => {
+    // 00:30 Riyadh on the 21st is still the 20th in UTC.
+    const justAfterRiyadhMidnight = Date.parse("2026-09-20T21:30:00.000Z");
+    expect(formatDelayTargetLabel("2026-09-21T20:59:00.000Z", justAfterRiyadhMidnight)).toBe(
+      "11:59 PM today",
+    );
+  });
+});
+
+describe("getDelayErrorMessage", () => {
+  it.each([
+    ["delay_task: not assigned", "You are not assigned to this task."],
+    ["delay_task: already delayed", "This task has already been delayed once."],
+    ["delay_task: already completed", "This task is already completed."],
+    ["delay_task: already overdue", "This task is already overdue, so it can't be delayed."],
+    ["delay_task: task not found", "This task no longer exists."],
+    ["delay_task: not signed in", "You are signed out. Sign in and try again."],
+  ])("maps %s to friendly text", (raw, expected) => {
+    expect(getDelayErrorMessage(raw)).toBe(expected);
+  });
+
+  it("falls back to the generic message for anything unrecognised", () => {
+    expect(getDelayErrorMessage("delay_task: something new")).toBe(DELAY_FALLBACK_MESSAGE);
+    expect(getDelayErrorMessage("TypeError: Network request failed")).toBe(DELAY_FALLBACK_MESSAGE);
+    expect(getDelayErrorMessage("not assigned")).toBe(DELAY_FALLBACK_MESSAGE);
+    expect(getDelayErrorMessage(undefined)).toBe(DELAY_FALLBACK_MESSAGE);
+    expect(getDelayErrorMessage("")).toBe(DELAY_FALLBACK_MESSAGE);
   });
 });

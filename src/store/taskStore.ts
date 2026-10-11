@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { create } from "zustand";
 
 import { generateId, slugify } from "@/lib/id";
-import { hasEmployeeResponded } from "@/lib/tasks";
+import { getDelayErrorMessage, hasEmployeeResponded } from "@/lib/tasks";
 import { useTaskReminderStore } from "@/store/taskReminderStore";
 import { useTaskRecurrenceStore } from "@/store/taskRecurrenceStore";
 import type { Task, TaskCategory, TaskCompletionStatus } from "@/types/tasks";
@@ -28,6 +28,9 @@ function mapDbTaskToTask(row: Record<string, unknown>): Task {
     createdAt: row.created_at as string,
     generatedFromRecurrenceRuleId:
       (row.generated_from_recurrence_rule_id as string | null) ?? null,
+    originalDueAt: (row.original_due_at as string | null) ?? null,
+    delayedAt: (row.delayed_at as string | null) ?? null,
+    delayedBy: (row.delayed_by as string | null) ?? null,
     assignedEmployeeIds: assignmentRows.map((a) => a.employee_clerk_id as string),
     completions: completionRows.map((c) => ({
       employeeClerkId: c.employee_clerk_id as string,
@@ -48,6 +51,10 @@ export type NewTaskValues = {
   assignedEmployeeIds: string[];
   createdBy: string;
 };
+
+/** What `delayTask` hands back to the UI: either it worked, or a short message
+ * that is safe to show a person as-is. */
+export type DelayTaskResult = { ok: true } | { ok: false; message: string };
 
 /**
  * An in-memory cache of whatever Supabase last returned, same contract as
@@ -110,6 +117,22 @@ type TaskState = {
     status: TaskCompletionStatus,
     note: string,
   ) => Promise<boolean>;
+  /**
+   * Delays a task through the `delay_task` RPC. The new due time is computed
+   * and written entirely on the server (`internal.delayed_due_at`) — nothing
+   * about it is sent from here, and `updateTask` is deliberately not involved,
+   * since employees have no UPDATE permission on `tasks` at all.
+   *
+   * The RPC enforces assignment, not-completed, not-overdue and
+   * not-already-delayed; the caller mirrors them with `canDelayTask` only to
+   * hide the button.
+   *
+   * On success the cached task is replaced by the returned row and this
+   * device's reminders on it are re-derived against the new due time, exactly
+   * as `updateTask` does for an edited due date. Other assignees' devices do
+   * the same on their next session start, like they do for an edit.
+   */
+  delayTask: (supabase: SupabaseClient, taskId: string) => Promise<DelayTaskResult>;
   /**
    * Who may actually delete is enforced by `tasks_delete_permission` in SQL
    * (admin: any task; manager: only their own) — this just fires the delete
@@ -265,6 +288,10 @@ export const useTaskStore = create<TaskState>()((set, get) => ({
           // never added through here — they go straight to Supabase and are
           // picked up by the next `fetchAll` (see `insertOccurrences`).
           generatedFromRecurrenceRuleId: null,
+          // A brand-new task has never been delayed.
+          originalDueAt: null,
+          delayedAt: null,
+          delayedBy: null,
           assignedEmployeeIds: values.assignedEmployeeIds,
           completions: [],
         },
@@ -480,6 +507,41 @@ export const useTaskStore = create<TaskState>()((set, get) => ({
       ),
     }));
     return true;
+  },
+
+  delayTask: async (supabase, taskId) => {
+    const { data, error } = await supabase.rpc("delay_task", { target_task_id: taskId });
+
+    if (error || !data) {
+      console.warn(`[taskStore] Could not delay task ${taskId}:`, error);
+      return { ok: false, message: getDelayErrorMessage(error?.message) };
+    }
+
+    const row = data as Record<string, unknown>;
+    // Same merge as `updateTask`: the RPC returns the bare `tasks` row without
+    // the assignment / completion embeds, so only the columns a delay changes
+    // are taken from it and the cached embeds are carried forward.
+    const existing = get().tasks.find((task) => task.id === taskId);
+    const updated: Task | null = existing
+      ? {
+          ...existing,
+          dueAt: row.due_at as string,
+          originalDueAt: (row.original_due_at as string | null) ?? null,
+          delayedAt: (row.delayed_at as string | null) ?? null,
+          delayedBy: (row.delayed_by as string | null) ?? null,
+        }
+      : null;
+
+    set((state) => ({
+      tasks: state.tasks.map((task) => (task.id === taskId && updated ? updated : task)),
+    }));
+
+    // A reminder fires relative to the due time, so every change to `due_at`
+    // goes through the rescheduling path — same as `updateTask`.
+    if (updated !== null) {
+      await useTaskReminderStore.getState().rescheduleForTask(updated);
+    }
+    return { ok: true };
   },
 
   deleteTask: async (supabase, id) => {

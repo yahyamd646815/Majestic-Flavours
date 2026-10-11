@@ -1,4 +1,5 @@
 import {
+  formatReportDate,
   getEndOfDayRiyadhIso,
   getRiyadhIsoDate,
   getRiyadhParts,
@@ -189,4 +190,123 @@ export function dueAtToTimePickerValue(dueAtIso: string): Date | null {
   const riyadh = dueAtRiyadhParts(dueAtIso);
   if (riyadh === null) return null;
   return new Date(riyadh.year, riyadh.month - 1, riyadh.day, riyadh.hour, riyadh.minute, 0, 0);
+}
+
+// ----------------------------------------------------------------------
+// Delay
+// ----------------------------------------------------------------------
+
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+/** A task due at or after this Riyadh hour is pushed to the next morning
+ * instead of to the end of its own day. Mirrors `internal.delayed_due_at`. */
+const DELAY_NEXT_DAY_FROM_HOUR = 20;
+
+/**
+ * Whether this person may press Delay on this task right now. The client-side
+ * mirror of the four checks inside the `delay_task` RPC, which is what
+ * actually enforces them — this exists to hide the button and fail fast, not
+ * to be trusted:
+ * - they are assigned to the task (any role);
+ * - nobody has completed it;
+ * - it has not already been delayed (one delay per task);
+ * - its due time is still in the future.
+ *
+ * "Still in the future" is strictly `dueAt > now`, because the RPC rejects
+ * `due_at <= now()` — a task due this exact instant is already overdue to it.
+ * `nowMs` is required, not defaulted: it must come from the screen's
+ * `useNowTick` or the button would never disappear on its own.
+ */
+export function canDelayTask(
+  task: Pick<Task, "dueAt" | "completions" | "assignedEmployeeIds" | "delayedAt">,
+  employeeClerkId: string,
+  nowMs: number,
+): boolean {
+  if (!task.assignedEmployeeIds.includes(employeeClerkId)) return false;
+  if (isTaskFullyCompleted(task)) return false;
+  if (task.delayedAt !== null) return false;
+  const dueMs = Date.parse(task.dueAt);
+  return !Number.isNaN(dueMs) && dueMs > nowMs;
+}
+
+/**
+ * The due time a delay would produce — a TypeScript mirror of the SQL rule in
+ * `internal.delayed_due_at`, used ONLY to tell the person what they are about
+ * to get. The real new time is computed by the `delay_task` RPC and the client
+ * never sends one.
+ *
+ * Riyadh wall-clock, fixed UTC+3:
+ * - due before 20:00 → 23:59 the same day;
+ * - due at or after 20:00 → 10:00 the next day.
+ *
+ * The same-day case goes through `getEndOfDayRiyadhIso` so the app's own
+ * end-of-day (exactly 23:59:00.000, also what `resolveDueAt` defaults to) and
+ * the SQL's 23:59:00 cannot drift apart. Only the hour is compared against the
+ * cutoff, which agrees with SQL's `time < '20:00'` at every second.
+ *
+ * `null` when `dueAtIso` cannot be parsed.
+ */
+export function getDelayedDueAt(dueAtIso: string): string | null {
+  const riyadh = dueAtRiyadhParts(dueAtIso);
+  if (riyadh === null) return null;
+  if (riyadh.hour < DELAY_NEXT_DAY_FROM_HOUR) {
+    return getEndOfDayRiyadhIso(dueAtRiyadhIsoDate(dueAtIso));
+  }
+  // `day + 1` past the end of a month is fine — the underlying `Date.UTC`
+  // rolls it into the next month.
+  return riyadhDateTimeToIso(riyadh.year, riyadh.month, riyadh.day + 1, 10, 0);
+}
+
+/** "11:59 PM" / "10:00 AM" — 12-hour, matching how the delay confirmation is
+ * worded to staff. */
+function formatClock12h(hour: number, minute: number): string {
+  const period = hour >= 12 ? "PM" : "AM";
+  const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${hour12}:${String(minute).padStart(2, "0")} ${period}`;
+}
+
+/**
+ * The new due time as the delay confirmation words it: "11:59 PM today",
+ * "10:00 AM tomorrow", or — when the task is due further out than that and the
+ * delay stays on its own day — "11:59 PM on 22 Sep 2026". "Today" and
+ * "tomorrow" are Riyadh's, relative to `nowMs`, not to the task's old due date.
+ */
+export function formatDelayTargetLabel(newDueAtIso: string, nowMs: number): string {
+  const riyadh = dueAtRiyadhParts(newDueAtIso);
+  if (riyadh === null) return newDueAtIso;
+
+  const time = formatClock12h(riyadh.hour, riyadh.minute);
+  const dayIso = dueAtRiyadhIsoDate(newDueAtIso);
+  if (dayIso === getRiyadhIsoDate(nowMs)) return `${time} today`;
+  if (dayIso === getRiyadhIsoDate(nowMs + ONE_DAY_MS)) return `${time} tomorrow`;
+  return `${time} on ${formatReportDate(dayIso)}`;
+}
+
+/** What the RPC's `delay_task: <reason>` errors say to a person, keyed by the
+ * reason text the SQL raises. */
+type DelayErrorEntry = readonly [reason: string, message: string];
+
+const DELAY_ERROR_MESSAGES: readonly DelayErrorEntry[] = [
+  ["not assigned", "You are not assigned to this task."],
+  ["already delayed", "This task has already been delayed once."],
+  ["already completed", "This task is already completed."],
+  ["already overdue", "This task is already overdue, so it can't be delayed."],
+  ["task not found", "This task no longer exists."],
+  ["not signed in", "You are signed out. Sign in and try again."],
+];
+
+/** Anything the RPC did not recognise — a dropped connection included. */
+export const DELAY_FALLBACK_MESSAGE =
+  "The task was not delayed. Check your connection and try again.";
+
+/** Maps the raw error message from the `delay_task` RPC to short, friendly
+ * text. Matches on the `delay_task: ` prefix plus the known reason, so an
+ * unrelated error that happens to contain similar words falls through to the
+ * generic message. */
+export function getDelayErrorMessage(rawMessage: string | null | undefined): string {
+  if (!rawMessage) return DELAY_FALLBACK_MESSAGE;
+  const known = DELAY_ERROR_MESSAGES.find(([reason]) =>
+    rawMessage.includes(`delay_task: ${reason}`),
+  );
+  return known ? known[1] : DELAY_FALLBACK_MESSAGE;
 }
