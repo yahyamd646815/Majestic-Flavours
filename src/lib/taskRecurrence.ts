@@ -573,9 +573,10 @@ function draftAsRule(values: RecurrenceRuleInput, nowMs: number): TaskRecurrence
 /**
  * How many occurrences the preview computes at most. Deliberately equal to
  * `MAX_ENDS_AFTER_OCCURRENCES`, so a rule that ends after a number of times
- * can never be truncated — only one ending on a far-off date can, and that is
- * the only shape that can run to tens of thousands. Keeps a preview that
- * recomputes on every keystroke to a few milliseconds.
+ * always runs to its own end — only one ending on a far-off date can actually
+ * be cut short here, and that is the only shape that can run to tens of
+ * thousands. Keeps a preview that recomputes on every keystroke to a few
+ * milliseconds.
  */
 const MAX_PREVIEW_OCCURRENCES = MAX_ENDS_AFTER_OCCURRENCES;
 
@@ -616,8 +617,16 @@ export function buildRecurrencePreview(
   );
 
   // Nothing was filtered out on the way (the preview starts from an empty set
-  // of existing keys), so a full result means the cap is what stopped it.
-  return { ok: true, occurrences, isTruncated: occurrences.length >= MAX_PREVIEW_OCCURRENCES };
+  // of existing keys), so a full result means the cap is what stopped it —
+  // but only for a rule that has no count of its own. A rule ending after
+  // exactly MAX_ENDS_AFTER_OCCURRENCES times stops there because it is
+  // finished, not because the preview cut it short, and calling that
+  // truncated would show "1000+ … and on" for a sequence that really does end.
+  const isTruncated =
+    validated.values.endsAfterOccurrences === null &&
+    occurrences.length >= MAX_PREVIEW_OCCURRENCES;
+
+  return { ok: true, occurrences, isTruncated };
 }
 
 /**
