@@ -36,6 +36,7 @@ import {
   TASK_DATE_FILTER_LABELS,
   dueAtRiyadhIsoDate,
   hasEmployeeResponded,
+  isCompletedTaskPastItsDay,
   isMissedTaskHiddenForViewer,
   isTaskFullyCompleted,
   isTaskOverdueForEmployee,
@@ -154,24 +155,30 @@ export default function Tasks() {
   // so the "Today" option rolls over at Riyadh midnight without a reload.
   const todayIsoDate = getRiyadhIsoDate(nowMs);
 
-  // Missed tasks this person no longer needs to see: past the 48-hour window,
+  // Tasks this person no longer needs to see. Missed: past the 48-hour window,
   // or already answered (by them, or — for someone not assigned — by every
-  // assignee). Hiding is display-only; the tasks stay in the store and in
-  // Records. Keyed by id so the list filter and the bulk-selection below agree
+  // assignee). Completed (Admin/Manager only — employees' lists already drop
+  // completed tasks below): past the Riyadh day it was completed. Hiding is
+  // display-only; the tasks stay in the store and in Records. Keyed by id so the list filter and the bulk-selection below agree
   // on exactly the same set.
-  const hiddenMissedTaskIds = useMemo(() => {
+  const hiddenTaskIds = useMemo(() => {
     const hidden = new Set<string>();
     if (!currentUserClerkId) return hidden;
     for (const task of tasks) {
-      if (isMissedTaskHiddenForViewer(task, currentUserClerkId, nowMs)) hidden.add(task.id);
+      if (
+        isMissedTaskHiddenForViewer(task, currentUserClerkId, nowMs) ||
+        (canManage && isCompletedTaskPastItsDay(task, nowMs))
+      ) {
+        hidden.add(task.id);
+      }
     }
     return hidden;
-  }, [tasks, currentUserClerkId, nowMs]);
+  }, [tasks, currentUserClerkId, canManage, nowMs]);
 
   const filteredTasks = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return tasks.filter((task) => {
-      if (hiddenMissedTaskIds.has(task.id)) return false;
+      if (hiddenTaskIds.has(task.id)) return false;
       const matchesCategory =
         selectedCategoryIds.size === 0 || selectedCategoryIds.has(task.categoryId);
       const matchesQuery = query.length === 0 || task.title.toLowerCase().includes(query);
@@ -189,7 +196,7 @@ export default function Tasks() {
     });
   }, [
     tasks,
-    hiddenMissedTaskIds,
+    hiddenTaskIds,
     selectedCategoryIds,
     searchQuery,
     selectedEmployeeIds,
@@ -234,8 +241,8 @@ export default function Tasks() {
   // by a bulk action. Derived rather than pruned from state so it can never
   // lag behind the clock by a render.
   const selectedActionableIds = useMemo(
-    () => [...selectedTaskIds].filter((taskId) => !hiddenMissedTaskIds.has(taskId)),
-    [selectedTaskIds, hiddenMissedTaskIds],
+    () => [...selectedTaskIds].filter((taskId) => !hiddenTaskIds.has(taskId)),
+    [selectedTaskIds, hiddenTaskIds],
   );
   const selectedCount = selectedActionableIds.length;
   const allVisibleSelected =

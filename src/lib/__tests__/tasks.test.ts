@@ -13,6 +13,7 @@ import {
   getDelayedDueAt,
   hasEmployeeResponded,
   isMissedTask,
+  isCompletedTaskPastItsDay,
   isMissedTaskHiddenForViewer,
   isTaskFullyCompleted,
   isTaskOverdueForEmployee,
@@ -583,5 +584,46 @@ describe("isMissedTaskHiddenForViewer", () => {
     const newDueMs = Date.parse(task.dueAt);
     expect(isMissedTaskHiddenForViewer(task, A, newDueMs + 47 * HOUR_MS)).toBe(false);
     expect(isMissedTaskHiddenForViewer(task, A, newDueMs + 49 * HOUR_MS)).toBe(true);
+  });
+});
+
+describe("isCompletedTaskPastItsDay", () => {
+  function completedAt(recordedAt: string) {
+    return { completions: [{ ...completion("user_1", "completed"), recordedAt }] };
+  }
+  const at = (iso: string) => Date.parse(iso);
+
+  it("keeps the task through 23:59:59 Riyadh on the day it was completed", () => {
+    const task = completedAt("2026-09-20T07:00:00Z");
+    expect(isCompletedTaskPastItsDay(task, at("2026-09-20T20:59:59Z"))).toBe(false);
+  });
+
+  it("hides it at Riyadh midnight", () => {
+    const task = completedAt("2026-09-20T07:00:00Z");
+    expect(isCompletedTaskPastItsDay(task, at("2026-09-20T21:00:00Z"))).toBe(true);
+  });
+
+  it("hides a task completed at 23:59:59 Riyadh one second later", () => {
+    const task = completedAt("2026-09-20T20:59:59Z");
+    expect(isCompletedTaskPastItsDay(task, at("2026-09-20T21:00:00Z"))).toBe(true);
+  });
+
+  it("hides a task completed several days ago", () => {
+    const task = completedAt("2026-09-15T07:00:00Z");
+    expect(isCompletedTaskPastItsDay(task, at("2026-09-20T07:00:00Z"))).toBe(true);
+  });
+
+  it("is false for a task that is not completed", () => {
+    const now = at("2026-09-30T00:00:00Z");
+    expect(isCompletedTaskPastItsDay({ completions: [] }, now)).toBe(false);
+  });
+
+  it("is false for a task with only a missed-reason response", () => {
+    const missed = { ...completion("user_1", "missed", "late"), recordedAt: "2026-09-15T07:00:00Z" };
+    expect(isCompletedTaskPastItsDay({ completions: [missed] }, at("2026-09-30T00:00:00Z"))).toBe(false);
+  });
+
+  it("is false when recordedAt cannot be parsed", () => {
+    expect(isCompletedTaskPastItsDay(completedAt("not-a-date"), at("2026-09-30T00:00:00Z"))).toBe(false);
   });
 });

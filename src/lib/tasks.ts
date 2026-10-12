@@ -357,3 +357,24 @@ export function isMissedTaskHiddenForViewer(
   if (assignees.includes(viewerClerkId)) return hasEmployeeResponded(task, viewerClerkId);
   return assignees.every((assigneeId) => hasEmployeeResponded(task, assigneeId));
 }
+
+/**
+ * Whether a *completed* task has outlived the Riyadh day it was completed on.
+ * The Admin/Manager Tasks page keeps a completed task listed until the end of
+ * that day so it can be checked, then drops it. "The day" is the Riyadh date of
+ * the Complete press (`recordedAt`), not the task's due date — so a task
+ * completed early is already past its day. Display-only; Records still shows it.
+ *
+ * Fails visible: an unparseable `recordedAt` returns false.
+ */
+export function isCompletedTaskPastItsDay(
+  task: Pick<Task, "completions">,
+  nowMs: number,
+): boolean {
+  if (!isTaskFullyCompleted(task)) return false;
+  const completed = task.completions.find((c) => c.status === "completed");
+  if (!completed) return false;
+  const completedMs = Date.parse(completed.recordedAt);
+  if (Number.isNaN(completedMs)) return false;
+  return getRiyadhIsoDate(completedMs) < getRiyadhIsoDate(nowMs);
+}
