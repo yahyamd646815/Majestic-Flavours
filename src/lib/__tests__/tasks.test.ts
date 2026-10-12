@@ -3,6 +3,7 @@
 import { formatReportDate, getEndOfDayRiyadhIso, getTodayIsoDate } from "@/lib/reports";
 import {
   DELAY_FALLBACK_MESSAGE,
+  MISSED_VISIBILITY_WINDOW_MS,
   canDelayTask,
   dueAtRiyadhIsoDate,
   dueAtToDatePickerValue,
@@ -11,6 +12,8 @@ import {
   getDelayErrorMessage,
   getDelayedDueAt,
   hasEmployeeResponded,
+  isMissedTask,
+  isMissedTaskHiddenForViewer,
   isTaskFullyCompleted,
   isTaskOverdueForEmployee,
   isTaskPastDue,
@@ -469,5 +472,116 @@ describe("getDelayErrorMessage", () => {
     expect(getDelayErrorMessage("not assigned")).toBe(DELAY_FALLBACK_MESSAGE);
     expect(getDelayErrorMessage(undefined)).toBe(DELAY_FALLBACK_MESSAGE);
     expect(getDelayErrorMessage("")).toBe(DELAY_FALLBACK_MESSAGE);
+  });
+});
+
+describe("isMissedTask", () => {
+  it("is false before the due time", () => {
+    expect(isMissedTask({ dueAt: DUE, completions: [] }, BEFORE_DUE)).toBe(false);
+  });
+
+  it("is true past the due time while nobody has completed it", () => {
+    expect(isMissedTask({ dueAt: DUE, completions: [] }, AFTER_DUE)).toBe(true);
+  });
+
+  it("is false once completed, however late", () => {
+    const task = { dueAt: DUE, completions: [completion("user_1", "completed")] };
+    expect(isMissedTask(task, AFTER_DUE)).toBe(false);
+  });
+});
+
+describe("isMissedTaskHiddenForViewer", () => {
+  const HOUR_MS = 60 * 60 * 1000;
+  const DUE_MS = Date.parse(DUE);
+  const A = "user_a";
+  const B = "user_b";
+  const ADMIN = "user_admin";
+
+  function missable(
+    overrides: Partial<Parameters<typeof isMissedTaskHiddenForViewer>[0]> = {},
+  ): Parameters<typeof isMissedTaskHiddenForViewer>[0] {
+    return { dueAt: DUE, completions: [], assignedEmployeeIds: [A, B], ...overrides };
+  }
+
+  it("never hides a task that is not yet due", () => {
+    expect(MISSED_VISIBILITY_WINDOW_MS).toBe(48 * HOUR_MS);
+    expect(isMissedTaskHiddenForViewer(missable(), A, BEFORE_DUE)).toBe(false);
+    expect(isMissedTaskHiddenForViewer(missable(), ADMIN, BEFORE_DUE)).toBe(false);
+  });
+
+  it("never hides a completed task, even one far past 48 hours", () => {
+    const task = missable({ completions: [completion(A, "completed")] });
+    const farLater = DUE_MS + 30 * 24 * HOUR_MS;
+    expect(isMissedTaskHiddenForViewer(task, A, farLater)).toBe(false);
+    expect(isMissedTaskHiddenForViewer(task, ADMIN, farLater)).toBe(false);
+  });
+
+  it("keeps a missed task nobody has responded to visible inside the 48 hours", () => {
+    const now = DUE_MS + 47 * HOUR_MS + 59 * 60 * 1000;
+    expect(isMissedTaskHiddenForViewer(missable(), A, now)).toBe(false);
+    expect(isMissedTaskHiddenForViewer(missable(), ADMIN, now)).toBe(false);
+  });
+
+  it("hides a missed task for everyone once it is past 48 hours", () => {
+    const now = DUE_MS + 48 * HOUR_MS + 60 * 1000;
+    expect(isMissedTaskHiddenForViewer(missable(), A, now)).toBe(true);
+    expect(isMissedTaskHiddenForViewer(missable(), ADMIN, now)).toBe(true);
+  });
+
+  it("still shows it at exactly 48 hours — the cut-off is strictly greater", () => {
+    const now = DUE_MS + 48 * HOUR_MS;
+    expect(isMissedTaskHiddenForViewer(missable(), A, now)).toBe(false);
+    expect(isMissedTaskHiddenForViewer(missable(), A, now + 1)).toBe(true);
+  });
+
+  it("hides it for an assignee as soon as they give a reason, but not for the other assignee", () => {
+    const task = missable({ completions: [completion(A, "missed", "Short-staffed")] });
+    expect(isMissedTaskHiddenForViewer(task, A, AFTER_DUE)).toBe(true);
+    expect(isMissedTaskHiddenForViewer(task, B, AFTER_DUE)).toBe(false);
+  });
+
+  describe("for a viewer who is not assigned", () => {
+    it("keeps it while no assignee has responded", () => {
+      expect(isMissedTaskHiddenForViewer(missable(), ADMIN, AFTER_DUE)).toBe(false);
+    });
+
+    it("keeps it while only some assignees have responded", () => {
+      const task = missable({ completions: [completion(A, "missed", "Short-staffed")] });
+      expect(isMissedTaskHiddenForViewer(task, ADMIN, AFTER_DUE)).toBe(false);
+    });
+
+    it("hides it once every assignee has responded", () => {
+      const task = missable({
+        completions: [completion(A, "missed", "Short-staffed"), completion(B, "missed", "Sick")],
+      });
+      expect(isMissedTaskHiddenForViewer(task, ADMIN, AFTER_DUE)).toBe(true);
+    });
+
+    it("is not satisfied by a response from someone who is not an assignee", () => {
+      const task = missable({ completions: [completion("user_stranger", "missed", "Hello")] });
+      expect(isMissedTaskHiddenForViewer(task, ADMIN, AFTER_DUE)).toBe(false);
+    });
+  });
+
+  describe("with no assignees", () => {
+    it("is not hidden the instant it goes overdue — 'every assignee responded' is vacuous", () => {
+      const task = missable({ assignedEmployeeIds: [] });
+      expect(isMissedTaskHiddenForViewer(task, ADMIN, DUE_MS + 1)).toBe(false);
+      expect(isMissedTaskHiddenForViewer(task, ADMIN, AFTER_DUE)).toBe(false);
+    });
+
+    it("still drops off once past 48 hours", () => {
+      const task = missable({ assignedEmployeeIds: [] });
+      expect(isMissedTaskHiddenForViewer(task, ADMIN, DUE_MS + 48 * HOUR_MS + 1)).toBe(true);
+    });
+  });
+
+  it("measures 48 hours from the delayed due time, not the original one", () => {
+    // Due 2026-01-01 at 10:00 Riyadh, delayed (before it went overdue) to the
+    // end of that day; the 48 hours run from the new, later `dueAt`.
+    const task = missable({ dueAt: "2026-01-01T20:59:00.000Z" });
+    const newDueMs = Date.parse(task.dueAt);
+    expect(isMissedTaskHiddenForViewer(task, A, newDueMs + 47 * HOUR_MS)).toBe(false);
+    expect(isMissedTaskHiddenForViewer(task, A, newDueMs + 49 * HOUR_MS)).toBe(true);
   });
 });

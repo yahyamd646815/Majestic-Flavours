@@ -310,3 +310,50 @@ export function getDelayErrorMessage(rawMessage: string | null | undefined): str
   );
   return known ? known[1] : DELAY_FALLBACK_MESSAGE;
 }
+
+// ----------------------------------------------------------------------
+// Missed tasks
+// ----------------------------------------------------------------------
+
+/** How long a missed task stays on the Tasks page after its due time. */
+export const MISSED_VISIBILITY_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+/** Past its due time and not completed by anyone — the same condition as the
+ * Overdue badge, named for what it means once the due time is well behind it. */
+export function isMissedTask(
+  task: Pick<Task, "dueAt" | "completions">,
+  nowMs: number,
+): boolean {
+  return isTaskPastDue(task, nowMs);
+}
+
+/**
+ * Whether the Tasks page should stop listing this task for this viewer. Only
+ * ever hides a *missed* task — pending and completed tasks are never hidden
+ * here. Hiding is display-only: nothing is deleted, and Records still shows it.
+ *
+ * A missed task is hidden when either:
+ * - it is more than 48 hours past its current `dueAt` (strictly — exactly 48h
+ *   is still listed). A delay only happens before a task is overdue, so a
+ *   delayed task is simply measured from its later due time; or
+ * - the viewer owes nothing more, which depends on who they are:
+ *   an assignee is done once they have responded themselves; anyone else is
+ *   done once *every* assignee has.
+ *
+ * A task with no assignees has nobody who could respond, so only the 48-hour
+ * rule applies — "every assignee has responded" is vacuously true for an empty
+ * list and must not hide it the instant it goes overdue.
+ */
+export function isMissedTaskHiddenForViewer(
+  task: Pick<Task, "dueAt" | "completions" | "assignedEmployeeIds">,
+  viewerClerkId: string,
+  nowMs: number,
+): boolean {
+  if (!isMissedTask(task, nowMs)) return false;
+  if (nowMs - Date.parse(task.dueAt) > MISSED_VISIBILITY_WINDOW_MS) return true;
+
+  const assignees = task.assignedEmployeeIds;
+  if (assignees.length === 0) return false;
+  if (assignees.includes(viewerClerkId)) return hasEmployeeResponded(task, viewerClerkId);
+  return assignees.every((assigneeId) => hasEmployeeResponded(task, assigneeId));
+}
