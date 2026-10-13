@@ -1,7 +1,16 @@
 import { useUser } from "@clerk/expo";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { useMemo, useState } from "react";
-import { Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  Alert,
+  FlatList,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { BulkAssignModal } from "@/components/BulkAssignModal";
@@ -15,21 +24,40 @@ import { SortToggle } from "@/components/SortToggle";
 import { TaskAddMenuModal } from "@/components/TaskAddMenuModal";
 import { TaskCard } from "@/components/TaskCard";
 import { TaskCategoryManagerModal } from "@/components/TaskCategoryManagerModal";
-import { TaskFormModal, type TaskFormValues } from "@/components/TaskFormModal";
+import { TaskFormModal, type TaskFormSubmission } from "@/components/TaskFormModal";
 import { colors } from "@/constants/theme";
 import { sampleUsers } from "@/data/sampleUsers";
+import { ONE_MINUTE_MS, useNowTick } from "@/hooks/useNowTick";
 import { getAssignableEmployees } from "@/lib/assignableEmployees";
 import { matchesEmployeeFilter } from "@/lib/inventoryFilters";
+import { getRiyadhIsoDate } from "@/lib/reports";
 import { useSupabaseClient } from "@/lib/supabase";
 import {
+  TASK_DATE_FILTER_LABELS,
+  dueAtRiyadhIsoDate,
   hasEmployeeResponded,
+  isCompletedTaskPastItsDay,
+  isMissedTaskHiddenForViewer,
   isTaskFullyCompleted,
   isTaskOverdueForEmployee,
+  matchesTaskDateFilter,
+  type TaskDateFilter,
 } from "@/lib/tasks";
+import { generateFirstOccurrence } from "@/lib/taskOccurrences";
+import { MAX_REMINDERS_PER_TASK, remindersForTask } from "@/lib/taskReminders";
+import { ensureNotificationPermission } from "@/lib/notifications";
 import { useAppUsersStore } from "@/store/appUsersStore";
+import { useTaskReminderStore } from "@/store/taskReminderStore";
+import { useTaskRecurrenceStore } from "@/store/taskRecurrenceStore";
 import { useTaskStore } from "@/store/taskStore";
 import { parseRole } from "@/types/role";
-import type { Task, TaskCompletionStatus } from "@/types/tasks";
+import type { ReminderOffsetUnit, Task, TaskCompletionStatus, TaskReminder } from "@/types/tasks";
+
+const DATE_FILTERS: TaskDateFilter[] = ["today", "week", "month", "all"];
+
+/** Shared empty array for the signed-out-mid-render case, so that branch does
+ * not hand `TaskCard` a fresh `[]` on every render. */
+const EMPTY_REMINDERS: TaskReminder[] = [];
 
 type TaskSortMode = "recent" | "alphabetical";
 
@@ -38,6 +66,13 @@ export default function Tasks() {
   const role = parseRole(user?.publicMetadata?.role);
   const canManage = role === "admin" || role === "manager";
   const currentUserClerkId = user?.id;
+  const router = useRouter();
+
+  // Overdue is derived from `dueAt` against "now", so without something moving
+  // "now" a task that crosses its due time while this screen sits open keeps
+  // rendering as not-overdue until an unrelated event happens to re-render it.
+  // Threaded explicitly into every overdue check below and into each TaskCard.
+  const nowMs = useNowTick(ONE_MINUTE_MS);
 
   const supabase = useSupabaseClient();
   const taskCategories = useTaskStore((state) => state.taskCategories);
@@ -59,7 +94,15 @@ export default function Tasks() {
   const addAssignment = useTaskStore((state) => state.addAssignment);
   const removeAssignment = useTaskStore((state) => state.removeAssignment);
   const completeTask = useTaskStore((state) => state.completeTask);
+  const delayTask = useTaskStore((state) => state.delayTask);
   const deleteTask = useTaskStore((state) => state.deleteTask);
+  const addRecurrenceRule = useTaskRecurrenceStore((state) => state.addRule);
+
+  // Own reminders only — `task_reminders`' RLS never returns anyone else's,
+  // so rows found by task id are by definition the signed-in person's.
+  const reminders = useTaskReminderStore((state) => state.reminders);
+  const addReminder = useTaskReminderStore((state) => state.addReminder);
+  const deleteReminder = useTaskReminderStore((state) => state.deleteReminder);
 
   const appUsers = useAppUsersStore((state) => state.users);
   const assignableEmployees = useMemo(
@@ -69,6 +112,11 @@ export default function Tasks() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [sortMode, setSortMode] = useState<TaskSortMode>("recent");
+  // "All Time" by default so the list opens showing exactly what it always
+  // has. The narrower options are what somebody reaches for deliberately —
+  // and "This Month" is the one that makes a task due weeks out reachable at
+  // all, which is the only way to set a reminder on it.
+  const [dateFilter, setDateFilter] = useState<TaskDateFilter>("all");
 
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
   const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false);
@@ -103,9 +151,34 @@ export default function Tasks() {
     [tasks, editTaskId],
   );
 
+  // Riyadh's today, re-read from the same live "now" the overdue checks use,
+  // so the "Today" option rolls over at Riyadh midnight without a reload.
+  const todayIsoDate = getRiyadhIsoDate(nowMs);
+
+  // Tasks this person no longer needs to see. Missed: past the 48-hour window,
+  // or already answered (by them, or — for someone not assigned — by every
+  // assignee). Completed (Admin/Manager only — employees' lists already drop
+  // completed tasks below): past the Riyadh day it was completed. Hiding is
+  // display-only; the tasks stay in the store and in Records. Keyed by id so the list filter and the bulk-selection below agree
+  // on exactly the same set.
+  const hiddenTaskIds = useMemo(() => {
+    const hidden = new Set<string>();
+    if (!currentUserClerkId) return hidden;
+    for (const task of tasks) {
+      if (
+        isMissedTaskHiddenForViewer(task, currentUserClerkId, nowMs) ||
+        (canManage && isCompletedTaskPastItsDay(task, nowMs))
+      ) {
+        hidden.add(task.id);
+      }
+    }
+    return hidden;
+  }, [tasks, currentUserClerkId, canManage, nowMs]);
+
   const filteredTasks = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return tasks.filter((task) => {
+      if (hiddenTaskIds.has(task.id)) return false;
       const matchesCategory =
         selectedCategoryIds.size === 0 || selectedCategoryIds.has(task.categoryId);
       const matchesQuery = query.length === 0 || task.title.toLowerCase().includes(query);
@@ -114,9 +187,22 @@ export default function Tasks() {
       // against, so no task-specific wrapper is needed. A no-op for
       // employees, since only Admin/Manager ever populate this set.
       const matchesEmployee = matchesEmployeeFilter(task, selectedEmployeeIds);
-      return matchesCategory && matchesQuery && matchesEmployee;
+      const matchesDue = matchesTaskDateFilter(
+        dueAtRiyadhIsoDate(task.dueAt),
+        dateFilter,
+        todayIsoDate,
+      );
+      return matchesCategory && matchesQuery && matchesEmployee && matchesDue;
     });
-  }, [tasks, selectedCategoryIds, searchQuery, selectedEmployeeIds]);
+  }, [
+    tasks,
+    hiddenTaskIds,
+    selectedCategoryIds,
+    searchQuery,
+    selectedEmployeeIds,
+    dateFilter,
+    todayIsoDate,
+  ]);
 
   // An employee's list drops a task once someone completed it (closed for
   // everyone) or once they themselves have responded — someone else's miss
@@ -142,15 +228,23 @@ export default function Tasks() {
     // (derived from `dueAt`, never stored), each partition sorted by the
     // chosen mode.
     const overdue = visibleTasks.filter((task) =>
-      isTaskOverdueForEmployee(task, currentUserClerkId),
+      isTaskOverdueForEmployee(task, currentUserClerkId, nowMs),
     );
     const notOverdue = visibleTasks.filter(
-      (task) => !isTaskOverdueForEmployee(task, currentUserClerkId),
+      (task) => !isTaskOverdueForEmployee(task, currentUserClerkId, nowMs),
     );
     return [...overdue.sort(compare), ...notOverdue.sort(compare)];
-  }, [visibleTasks, sortMode, canManage, currentUserClerkId]);
+  }, [visibleTasks, sortMode, canManage, currentUserClerkId, nowMs]);
 
-  const selectedCount = selectedTaskIds.size;
+  // `selectedTaskIds` survives filter changes on purpose, but a task that has
+  // since dropped off the page as missed must not stay selected or be acted on
+  // by a bulk action. Derived rather than pruned from state so it can never
+  // lag behind the clock by a render.
+  const selectedActionableIds = useMemo(
+    () => [...selectedTaskIds].filter((taskId) => !hiddenTaskIds.has(taskId)),
+    [selectedTaskIds, hiddenTaskIds],
+  );
+  const selectedCount = selectedActionableIds.length;
   const allVisibleSelected =
     sortedTasks.length > 0 && sortedTasks.every((task) => selectedTaskIds.has(task.id));
 
@@ -186,7 +280,7 @@ export default function Tasks() {
     if (isAssigning) return;
     setIsAssigning(true);
     try {
-      const targetIds = [...selectedTaskIds];
+      const targetIds = selectedActionableIds;
 
       // `addAssignment` upserts with ignoreDuplicates, so tasks this person is
       // already on need no client-side short-circuit.
@@ -213,7 +307,7 @@ export default function Tasks() {
     if (isAssigning) return;
     setIsAssigning(true);
     try {
-      const targetIds = [...selectedTaskIds];
+      const targetIds = selectedActionableIds;
 
       // A delete that matches no row is a no-op rather than an error, so
       // tasks this person was never on are left untouched.
@@ -262,8 +356,47 @@ export default function Tasks() {
     ]);
   }
 
-  async function handleSubmitTask(values: TaskFormValues) {
+  async function handleSubmitTask(submission: TaskFormSubmission) {
     if (!user?.id) return;
+
+    // A recurring submission is a template, not a task: it creates no row in
+    // `tasks` itself. Its FIRST occurrence is then created immediately, so a
+    // new recurring task is visible right away rather than only once its due
+    // time arrives; every occurrence after it still arrives lazily through
+    // `useTaskOccurrenceGeneration`.
+    if (submission.mode === "recurring") {
+      const rule = await addRecurrenceRule(supabase, {
+        ...submission.values,
+        createdBy: user.id,
+      });
+      if (rule === null) {
+        Alert.alert(
+          "Could not create recurring task",
+          "The recurring task was not created. Check your connection and try again.",
+        );
+        return;
+      }
+
+      // Not fatal if this fails: the rule itself is saved, and the same
+      // occurrence gets picked up by the next session's generation pass once
+      // it is genuinely due. The confirmation below says which happened
+      // rather than promising something that did not.
+      const createdFirst = await generateFirstOccurrence(supabase, rule);
+      // The list was loaded before that row existed, so it needs re-reading
+      // for the new task to show up without a restart.
+      if (createdFirst) await fetchAll(supabase);
+
+      closeTaskForm();
+      Alert.alert(
+        "Recurring task created",
+        createdFirst
+          ? "The first task is in the list now. The rest appear automatically as each due time arrives."
+          : "Each task will appear in the list automatically when its due time arrives.",
+      );
+      return;
+    }
+
+    const values = submission.values;
 
     if (editTask) {
       // Assignments are diffed against the task as it stands in the store
@@ -326,6 +459,77 @@ export default function Tasks() {
     }
   }
 
+  // Reached only after TaskCard's own confirmation. The store has already
+  // logged the real error; the message here is the friendly version of it.
+  async function handleDelay(taskId: string) {
+    const result = await delayTask(supabase, taskId);
+    if (!result.ok) Alert.alert("Could not delay task", result.message);
+  }
+
+  async function handleAddReminder(
+    task: Task,
+    offsetValue: number,
+    offsetUnit: ReminderOffsetUnit,
+  ) {
+    if (!currentUserClerkId) return;
+
+    // Asked for here rather than on sign-in: this is the first moment the
+    // permission has a reason attached, and staff who never set a reminder
+    // are never prompted at all.
+    const isPermitted = await ensureNotificationPermission();
+
+    const result = await addReminder(
+      supabase,
+      task,
+      currentUserClerkId,
+      offsetValue,
+      offsetUnit,
+    );
+    // The control stops offering "add another" at the limit, so this is the
+    // store's own backstop rather than a path anyone reaches by tapping.
+    if (result.outcome === "limit-reached") {
+      Alert.alert(
+        "Too many reminders",
+        `You can have up to ${MAX_REMINDERS_PER_TASK} reminders on one task. Remove one first.`,
+      );
+      return;
+    }
+    if (result.outcome === "failed") {
+      Alert.alert(
+        "Could not save reminder",
+        "The reminder was not saved. Check your connection and try again.",
+      );
+      return;
+    }
+    // Saved but silent — the two ways that happens are worth saying out loud,
+    // because an unreported one is a reminder somebody is counting on that
+    // never arrives.
+    if (!isPermitted) {
+      Alert.alert(
+        "Reminder saved, but notifications are off",
+        "Turn on notifications for Majestic Flavours in your phone's settings and it will start working.",
+      );
+      return;
+    }
+    if (!result.wasScheduled) {
+      Alert.alert(
+        "Reminder saved, but it will not be sent",
+        "That reminder time has already passed. Set a shorter one to be reminded before this task is due.",
+      );
+    }
+  }
+
+  /** One reminder, by its own id — the task's others are untouched. */
+  async function handleRemoveReminder(reminderId: string) {
+    const succeeded = await deleteReminder(supabase, reminderId);
+    if (!succeeded) {
+      Alert.alert(
+        "Could not remove reminder",
+        "The reminder was not removed. Check your connection and try again.",
+      );
+    }
+  }
+
   // Mirrors `tasks_delete_permission` in SQL: admin can delete any task,
   // manager only their own, employee never — so the UI never offers an
   // action the database would reject anyway.
@@ -373,32 +577,47 @@ export default function Tasks() {
           <Text className="font-inter-bold text-2xl text-maroon">Tasks</Text>
 
           {isReady && canManage ? (
-            <TouchableOpacity
-              className={
-                isSelectionMode
-                  ? "flex-row items-center gap-1 rounded-lg bg-gold px-3 py-2"
-                  : "flex-row items-center gap-1 rounded-lg border border-border px-3 py-2"
-              }
-              activeOpacity={0.85}
-              onPress={() => (isSelectionMode ? exitSelectionMode() : setIsSelectionMode(true))}
-              accessibilityRole="button"
-              accessibilityLabel={isSelectionMode ? "Exit selection mode" : "Select tasks"}
-            >
-              <Ionicons
-                name={isSelectionMode ? "close" : "checkbox-outline"}
-                size={16}
-                color={isSelectionMode ? colors.textPrimary : colors.maroon}
-              />
-              <Text
+            <View className="flex-row items-center gap-2">
+              {!isSelectionMode ? (
+                <TouchableOpacity
+                  className="flex-row items-center gap-1 rounded-lg border border-border px-3 py-2"
+                  activeOpacity={0.85}
+                  onPress={() => router.push("/records")}
+                  accessibilityRole="button"
+                  accessibilityLabel="View records"
+                >
+                  <Ionicons name="time-outline" size={16} color={colors.maroon} />
+                  <Text className="font-inter-semibold text-xs text-maroon">Records</Text>
+                </TouchableOpacity>
+              ) : null}
+
+              <TouchableOpacity
                 className={
                   isSelectionMode
-                    ? "font-inter-semibold text-xs text-text-primary"
-                    : "font-inter-semibold text-xs text-maroon"
+                    ? "flex-row items-center gap-1 rounded-lg bg-gold px-3 py-2"
+                    : "flex-row items-center gap-1 rounded-lg border border-border px-3 py-2"
                 }
+                activeOpacity={0.85}
+                onPress={() => (isSelectionMode ? exitSelectionMode() : setIsSelectionMode(true))}
+                accessibilityRole="button"
+                accessibilityLabel={isSelectionMode ? "Exit selection mode" : "Select tasks"}
               >
-                {isSelectionMode ? "Done" : "Select"}
-              </Text>
-            </TouchableOpacity>
+                <Ionicons
+                  name={isSelectionMode ? "close" : "checkbox-outline"}
+                  size={16}
+                  color={isSelectionMode ? colors.textPrimary : colors.maroon}
+                />
+                <Text
+                  className={
+                    isSelectionMode
+                      ? "font-inter-semibold text-xs text-text-primary"
+                      : "font-inter-semibold text-xs text-maroon"
+                  }
+                >
+                  {isSelectionMode ? "Done" : "Select"}
+                </Text>
+              </TouchableOpacity>
+            </View>
           ) : null}
         </View>
 
@@ -432,6 +651,40 @@ export default function Tasks() {
               />
             ) : null}
 
+            {/* Labelled like `SortToggle`, but the chips scroll like
+                `CategoryFilter`'s — four options plus a large system font size
+                would otherwise run off a narrow phone. */}
+            <View className="grow-0 gap-1.5">
+              <Text className="px-4 font-inter-medium text-xs text-text-secondary">Due</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                className="grow-0"
+                contentContainerStyle={styles.filterContent}
+              >
+                {DATE_FILTERS.map((filter) => {
+                  const isActive = dateFilter === filter;
+                  return (
+                    <TouchableOpacity
+                      key={filter}
+                      className={isActive ? "chip chip--active" : "chip"}
+                      activeOpacity={0.8}
+                      onPress={() => setDateFilter(filter)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Due ${TASK_DATE_FILTER_LABELS[filter]}`}
+                      accessibilityState={{ selected: isActive }}
+                    >
+                      <Text
+                        className={isActive ? "chip__text chip__text--active" : "chip__text"}
+                      >
+                        {TASK_DATE_FILTER_LABELS[filter]}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+
             <SortToggle
               label="Sort"
               options={[
@@ -462,10 +715,21 @@ export default function Tasks() {
                   categories={taskCategories}
                   canManage={canManage}
                   currentUserClerkId={currentUserClerkId}
+                  nowMs={nowMs}
+                  reminders={
+                    currentUserClerkId === undefined
+                      ? EMPTY_REMINDERS
+                      : remindersForTask(reminders, item.id, currentUserClerkId)
+                  }
+                  onAddReminder={(offsetValue, offsetUnit) =>
+                    void handleAddReminder(item, offsetValue, offsetUnit)
+                  }
+                  onRemoveReminder={(reminderId) => void handleRemoveReminder(reminderId)}
                   onRemoveAssignment={(employeeClerkId) =>
                     void handleRemoveAssignment(item.id, employeeClerkId)
                   }
                   onComplete={(status, note) => void handleComplete(item.id, status, note)}
+                  onDelay={() => handleDelay(item.id)}
                   onEdit={() => openEditTaskForm(item.id)}
                   canDelete={canDeleteTask(item)}
                   onDelete={() => setDeleteTarget(item)}
@@ -564,7 +828,7 @@ export default function Tasks() {
         visible={isTaskFormOpen || editTask !== null}
         task={editTask ?? undefined}
         onClose={closeTaskForm}
-        onSubmit={(values) => void handleSubmitTask(values)}
+        onSubmit={(submission) => void handleSubmitTask(submission)}
       />
 
       <BulkAssignModal
@@ -586,12 +850,23 @@ export default function Tasks() {
           if (deleteTarget) void handleDelete(deleteTarget);
           setDeleteTarget(null);
         }}
+        warningMessage={
+          deleteTarget?.generatedFromRecurrenceRuleId != null
+            ? "This will also cancel the entire recurring series — no further occurrences will be created. This action cannot be undone."
+            : undefined
+        }
       />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  // Same chip-row treatment as `CategoryFilter`'s own content container.
+  filterContent: {
+    gap: 8,
+    paddingHorizontal: 16,
+    alignItems: "center",
+  },
   listContent: {
     paddingHorizontal: 16,
     paddingBottom: 96,

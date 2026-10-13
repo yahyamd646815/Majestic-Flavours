@@ -2,12 +2,27 @@ import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
 import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
+import { TaskReminderControl } from "@/components/TaskReminderControl";
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { getCategoryName } from "@/lib/inventoryLabels";
 import { formatDueDateTime } from "@/lib/reports";
-import { hasEmployeeResponded, isTaskFullyCompleted, isTaskOverdueForEmployee, isTaskPastDue } from "@/lib/tasks";
+import {
+  canDelayTask,
+  formatDelayTargetLabel,
+  getDelayedDueAt,
+  hasEmployeeResponded,
+  isTaskFullyCompleted,
+  isTaskOverdueForEmployee,
+  isTaskPastDue,
+} from "@/lib/tasks";
 import { useAppUsersStore } from "@/store/appUsersStore";
-import type { Task, TaskCategory, TaskCompletionStatus } from "@/types/tasks";
+import type {
+  ReminderOffsetUnit,
+  Task,
+  TaskCategory,
+  TaskCompletionStatus,
+  TaskReminder,
+} from "@/types/tasks";
 
 type TaskCardProps = {
   task: Task;
@@ -20,8 +35,27 @@ type TaskCardProps = {
    * only if they're actually assigned to it (which, since RLS already scopes
    * their `select` to assigned-only, is every task they can see). */
   currentUserClerkId: string | undefined;
+  /** "Now" for both overdue checks below, supplied by the caller's `useNowTick`
+   * rather than read here — the helpers' own `Date.now()` default is invisible
+   * to React, so the badge would never move on its own while the list sits
+   * open. */
+  nowMs: number;
+  /**
+   * The signed-in person's own reminders on this task — up to three, longest
+   * lead time first, empty when they have set none. Nobody else's is ever
+   * passed: `task_reminders` is personal, so a reminder has no meaning to
+   * anyone but its owner and Admin/Manager see nothing here on tasks they
+   * merely manage.
+   */
+  reminders: TaskReminder[];
+  onAddReminder: (offsetValue: number, offsetUnit: ReminderOffsetUnit) => void;
+  onRemoveReminder: (reminderId: string) => void;
   onRemoveAssignment: (employeeClerkId: string) => void;
   onComplete: (status: TaskCompletionStatus, note: string) => void;
+  /** Runs the delay once the person has confirmed it. Returns when the request
+   * has finished, so the Delay button can stay disabled for exactly as long as
+   * it is in flight. Reporting a failure is the caller's job. */
+  onDelay: () => Promise<void>;
   /** Rendered for Admin/Manager only — opens `TaskFormModal` in edit mode. */
   onEdit: () => void;
   /** Whether the Delete action is offered at all — decided by the caller from
@@ -45,8 +79,13 @@ export function TaskCard({
   categories,
   canManage,
   currentUserClerkId,
+  nowMs,
+  reminders,
+  onAddReminder,
+  onRemoveReminder,
   onRemoveAssignment,
   onComplete,
+  onDelay,
   onEdit,
   canDelete,
   onDelete,
@@ -59,14 +98,15 @@ export function TaskCard({
   const [isActionOpen, setIsActionOpen] = useState(false);
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [isDelaying, setIsDelaying] = useState(false);
 
   const categoryName = getCategoryName(categories, task.categoryId);
   // Two different questions, deliberately kept apart: the badge is about the
   // task ("past due, nobody has completed it"), the action button is about
   // this viewer ("past due and I still owe my own response").
-  const pastDue = isTaskPastDue(task);
+  const pastDue = isTaskPastDue(task, nowMs);
   const overdueForMe =
-    currentUserClerkId !== undefined && isTaskOverdueForEmployee(task, currentUserClerkId);
+    currentUserClerkId !== undefined && isTaskOverdueForEmployee(task, currentUserClerkId, nowMs);
   const isOpen = !isTaskFullyCompleted(task);
 
   // Paired with the id (unlike `getAssignedNames`, which only returns
@@ -101,6 +141,37 @@ export function TaskCard({
     task.assignedEmployeeIds.includes(currentUserClerkId) &&
     !hasEmployeeResponded(task, currentUserClerkId);
 
+  // Sits on the Complete row, so it can only be offered where Complete is. That
+  // loses nothing: anyone who can delay is assigned, the task is open and not
+  // yet due, so they have not responded and `canComplete` already holds.
+  const canDelay =
+    canComplete &&
+    currentUserClerkId !== undefined &&
+    canDelayTask(task, currentUserClerkId, nowMs);
+
+  /**
+   * A reminder is a purely personal preference, so the control is shown only
+   * to someone looking at a task they are genuinely assigned to — never to an
+   * Admin or Manager on a task they are merely managing, where it would carry
+   * no operational meaning. An Admin or Manager who assigned the task to
+   * themselves is on exactly the same footing as anyone else here, matching
+   * `canComplete` above and what `task_reminders_insert_own` actually permits.
+   *
+   * Withheld entirely once the task is completed or past due, rather than
+   * offered and then failing after the fact: a completed task has nothing left
+   * to be reminded about, and a past-due one has no instant left at which a
+   * reminder could fire. `pastDue` (`isTaskPastDue`) rather than `overdueForMe`
+   * covers the second — the two agree except once this person has submitted
+   * their own miss reason, where `isTaskOverdueForEmployee` goes false while
+   * the due time is just as gone.
+   */
+  const canSetReminder =
+    !selectionMode &&
+    currentUserClerkId !== undefined &&
+    task.assignedEmployeeIds.includes(currentUserClerkId) &&
+    isOpen &&
+    !pastDue;
+
   function handleRemoveAssignment(employeeClerkId: string) {
     if (task.assignedEmployeeIds.length === 1) {
       Alert.alert(
@@ -114,6 +185,33 @@ export function TaskCard({
       return;
     }
     onRemoveAssignment(employeeClerkId);
+  }
+
+  async function runDelay() {
+    if (isDelaying) return;
+    setIsDelaying(true);
+    try {
+      await onDelay();
+    } finally {
+      setIsDelaying(false);
+    }
+  }
+
+  // A plain confirmation rather than the typed-DELETE flow — nothing is
+  // destroyed. It asks anyway because a task can only be delayed once, so a
+  // stray tap can't be undone. The wording names the exact result, computed by
+  // the client-side mirror of the rule the server will actually apply.
+  function handleDelayPress() {
+    const newDueAt = getDelayedDueAt(task.dueAt);
+    if (newDueAt === null) return;
+    Alert.alert(
+      "Delay this task?",
+      `Move this task to ${formatDelayTargetLabel(newDueAt, nowMs)}?\n\nEveryone assigned will see the new time. A task can only be delayed once.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delay", onPress: () => void runDelay() },
+      ],
+    );
   }
 
   function handleConfirmAction() {
@@ -143,9 +241,18 @@ export function TaskCard({
           <Text className="font-inter-semibold text-base text-text-primary">{task.title}</Text>
           <Text className="font-inter text-xs text-text-secondary">{categoryName}</Text>
         </View>
-        {pastDue ? (
-          <View className="status-badge status-badge--out-of-stock">
-            <Text className="status-badge__text--out-of-stock">Overdue</Text>
+        {pastDue || task.delayedAt !== null ? (
+          <View className="items-end gap-1">
+            {task.delayedAt !== null ? (
+              <View className="status-badge status-badge--low-stock">
+                <Text className="status-badge__text--low-stock">Delayed</Text>
+              </View>
+            ) : null}
+            {pastDue ? (
+              <View className="status-badge status-badge--out-of-stock">
+                <Text className="status-badge__text--out-of-stock">Overdue</Text>
+              </View>
+            ) : null}
           </View>
         ) : null}
       </View>
@@ -154,9 +261,16 @@ export function TaskCard({
         <Text className="font-inter text-sm text-text-primary">{task.description}</Text>
       ) : null}
 
-      <Text className="font-inter text-sm text-text-primary">
-        Due {formatDueDateTime(task.dueAt)}
-      </Text>
+      <View className="gap-0.5">
+        <Text className="font-inter text-sm text-text-primary">
+          Due {formatDueDateTime(task.dueAt)}
+        </Text>
+        {task.originalDueAt !== null ? (
+          <Text className="font-inter text-xs text-text-secondary">
+            Originally due {formatDueDateTime(task.originalDueAt)}
+          </Text>
+        ) : null}
+      </View>
 
       {assignedPairs.length > 0 ? (
         <View className="flex-row flex-wrap gap-2">
@@ -241,17 +355,49 @@ export function TaskCard({
               </View>
             </>
           ) : (
-            <TouchableOpacity
-              className="btn-primary"
-              activeOpacity={0.85}
-              onPress={() => setIsActionOpen(true)}
-            >
-              <Text className="btn-primary__text">
-                {overdueForMe ? "Submit Reason" : "Complete"}
-              </Text>
-            </TouchableOpacity>
+            <View className="flex-row gap-3">
+              <TouchableOpacity
+                className="btn-primary flex-1"
+                activeOpacity={0.85}
+                onPress={() => setIsActionOpen(true)}
+              >
+                <Text className="btn-primary__text">
+                  {overdueForMe ? "Submit Reason" : "Complete"}
+                </Text>
+              </TouchableOpacity>
+
+              {canDelay ? (
+                <TouchableOpacity
+                  className={
+                    isDelaying
+                      ? "flex-1 items-center rounded-lg border border-border px-4 py-3 opacity-50"
+                      : "flex-1 items-center rounded-lg border border-border px-4 py-3"
+                  }
+                  activeOpacity={0.8}
+                  disabled={isDelaying}
+                  onPress={handleDelayPress}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Delay ${task.title}`}
+                  accessibilityState={{ disabled: isDelaying }}
+                >
+                  <Text className="font-inter-semibold text-base text-maroon">
+                    {isDelaying ? "Delaying…" : "Delay"}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
           )}
         </View>
+      ) : null}
+
+      {canSetReminder ? (
+        <TaskReminderControl
+          dueAt={task.dueAt}
+          nowMs={nowMs}
+          reminders={reminders}
+          onAdd={onAddReminder}
+          onRemove={onRemoveReminder}
+        />
       ) : null}
 
       {canManage && !selectionMode ? (

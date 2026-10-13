@@ -3,10 +3,20 @@ import NativeDateTimePicker from "@expo/ui/community/datetime-picker";
 import { useMemo, useState } from "react";
 import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
+import { RecurrenceFields } from "@/components/RecurrenceFields";
 import { colors, fonts, radii, spacing } from "@/constants/theme";
 import { sampleUsers } from "@/data/sampleUsers";
 import { getAssignableTaskParticipants } from "@/lib/assignableEmployees";
-import { dueAtToPickerDate, resolveDueAt } from "@/lib/tasks";
+import { formatReportDate, getTodayIsoDate } from "@/lib/reports";
+import { dueAtToDatePickerValue, dueAtToTimePickerValue, resolveDueAt } from "@/lib/tasks";
+import {
+  DEFAULT_RECURRENCE_DRAFT,
+  isoDateToPickerDate,
+  pickerDateToIsoDate,
+  validateRecurrenceDraft,
+  type RecurrenceFormDraft,
+  type RecurrenceRuleInput,
+} from "@/lib/taskRecurrence";
 import { useAppUsersStore } from "@/store/appUsersStore";
 import { useTaskStore } from "@/store/taskStore";
 import { parseRole } from "@/types/role";
@@ -22,6 +32,22 @@ export type TaskFormValues = {
   assignedEmployeeIds: string[];
 };
 
+/** A recurrence template rather than a task: it carries no `dueAt`, because
+ * each occurrence works its own out when it is generated. */
+export type RecurringTaskFormValues = RecurrenceRuleInput & {
+  title: string;
+  categoryId: string;
+  description: string | null;
+  assignedEmployeeIds: string[];
+};
+
+/** The two things this form can produce. Editing always yields `one-time` —
+ * an existing task is a single row, whether or not a rule generated it, and
+ * editing a rule itself belongs to the recurrence management screen. */
+export type TaskFormSubmission =
+  | { mode: "one-time"; values: TaskFormValues }
+  | { mode: "recurring"; values: RecurringTaskFormValues };
+
 type TaskFormModalProps = {
   visible: boolean;
   /** Present in edit mode — every field is pre-filled from it, exactly as
@@ -30,10 +56,14 @@ type TaskFormModalProps = {
    * this snapshot. */
   task?: Task;
   onClose: () => void;
-  onSubmit: (values: TaskFormValues) => void;
+  onSubmit: (submission: TaskFormSubmission) => void;
 };
 
-/** Creates a task, or edits an existing one when `task` is given. Reached
+/** Creates a task — one-time, or a recurring template via the Repeat toggle
+ * — or edits an existing one when `task` is given. Title, category,
+ * description and assignees are collected identically either way; only the
+ * timing half differs, which is why this is one form with a toggle rather
+ * than two. Reached
  * from `TaskAddMenuModal`'s "Create Task" option (itself unreachable without
  * at least one task category existing) and from `TaskCard`'s Edit action.
  * Mirrors `ItemFormModal`'s structure closely: same category-chips /
@@ -68,16 +98,24 @@ export function TaskFormModal({ visible, task, onClose, onSubmit }: TaskFormModa
   const [assignedEmployeeIds, setAssignedEmployeeIds] = useState<string[]>(
     task?.assignedEmployeeIds ?? [],
   );
-  // Both pickers seed from the same instant when editing, so an untouched
-  // save round-trips `dueAt` back to exactly the value it already had.
+  // Both pickers seed from the same `dueAt` when editing, so an untouched save
+  // round-trips it back to exactly the value it already had — but each gets
+  // its own construction, since the two pickers read their `value` prop in
+  // different terms (UTC digits for the date, local digits for the time).
   const [pickedDate, setPickedDate] = useState<Date | null>(() =>
-    task ? dueAtToPickerDate(task.dueAt) : null,
+    task ? dueAtToDatePickerValue(task.dueAt) : null,
   );
   const [pickedTime, setPickedTime] = useState<Date | null>(() =>
-    task ? dueAtToPickerDate(task.dueAt) : null,
+    task ? dueAtToTimePickerValue(task.dueAt) : null,
   );
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [isTimePickerOpen, setIsTimePickerOpen] = useState(false);
+  // Create-only. An existing task is one row; turning it into a recurring
+  // template is not an edit, so the toggle is not offered in edit mode and
+  // this stays false there.
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [recurrenceDraft, setRecurrenceDraft] =
+    useState<RecurrenceFormDraft>(DEFAULT_RECURRENCE_DRAFT);
   const [error, setError] = useState<string | null>(null);
 
   function toggleEmployee(id: string) {
@@ -118,19 +156,35 @@ export function TaskFormModal({ visible, task, onClose, onSubmit }: TaskFormModa
     // editor simply isn't allowed to assign (a Manager editing an
     // Admin-created task, say).
     const trimmedDescription = description.trim();
-
-    onSubmit({
+    const shared = {
       title: trimmedTitle,
       categoryId,
       description: trimmedDescription.length > 0 ? trimmedDescription : null,
-      dueAt: resolveDueAt(pickedDate, pickedTime),
       assignedEmployeeIds,
+    };
+
+    if (isRecurring) {
+      // Every rejection here mirrors a real SQL check constraint, so a
+      // submission that gets past this cannot fail on them.
+      const recurrence = validateRecurrenceDraft(recurrenceDraft, getTodayIsoDate());
+      if (!recurrence.ok) {
+        setError(recurrence.message);
+        return;
+      }
+      onSubmit({ mode: "recurring", values: { ...shared, ...recurrence.values } });
+      return;
+    }
+
+    onSubmit({
+      mode: "one-time",
+      values: { ...shared, dueAt: resolveDueAt(pickedDate, pickedTime) },
     });
   }
 
-  const dueDateLabel = pickedDate
-    ? pickedDate.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
-    : "Pick Date";
+  // Read back out through `pickerDateToIsoDate` rather than rendered with
+  // `toLocaleDateString` directly: the picked value carries its date in UTC
+  // digits, so local rendering would show the previous day west of UTC+0.
+  const dueDateLabel = pickedDate ? formatReportDate(pickerDateToIsoDate(pickedDate)) : "Pick Date";
   const dueTimeLabel = pickedTime
     ? pickedTime.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
     : "Pick Time";
@@ -144,7 +198,7 @@ export function TaskFormModal({ visible, task, onClose, onSubmit }: TaskFormModa
             keyboardShouldPersistTaps="handled"
           >
             <Text className="font-inter-bold text-xl text-maroon">
-              {task ? "Edit Task" : "Create Task"}
+              {task ? "Edit Task" : isRecurring ? "Create Recurring Task" : "Create Task"}
             </Text>
 
             <View className="mt-4 gap-4">
@@ -194,63 +248,111 @@ export function TaskFormModal({ visible, task, onClose, onSubmit }: TaskFormModa
                 </View>
               </View>
 
-              <View className="gap-1">
-                <Text className="font-inter-medium text-sm text-text-primary">Due</Text>
-                {task ? null : (
-                  <Text className="font-inter text-xs text-text-secondary">
-                    Leave blank to default to the end of today.
-                  </Text>
-                )}
-                <View className="flex-row gap-3">
-                  <TouchableOpacity
-                    className="flex-1 items-center rounded-lg border border-border py-3"
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      setIsTimePickerOpen(false);
-                      setIsDatePickerOpen((open) => !open);
-                    }}
-                  >
-                    <Text className="font-inter-semibold text-sm text-text-primary">
-                      {dueDateLabel}
+              {task ? null : (
+                <View className="gap-1">
+                  <Text className="font-inter-medium text-sm text-text-primary">Repeat</Text>
+                  <View className="flex-row flex-wrap gap-2">
+                    {[
+                      { value: false, label: "One-time" },
+                      { value: true, label: "Recurring" },
+                    ].map((option) => {
+                      const isActive = option.value === isRecurring;
+                      return (
+                        <TouchableOpacity
+                          key={option.label}
+                          className={isActive ? "chip chip--active" : "chip"}
+                          activeOpacity={0.8}
+                          onPress={() => {
+                            setIsDatePickerOpen(false);
+                            setIsTimePickerOpen(false);
+                            setIsRecurring(option.value);
+                          }}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: isActive }}
+                        >
+                          <Text
+                            className={
+                              isActive ? "chip__text chip__text--active" : "chip__text"
+                            }
+                          >
+                            {option.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                  {isRecurring ? (
+                    <Text className="font-inter text-xs text-text-secondary">
+                      The first task appears in the list straight away. Every one after it is
+                      created automatically once its own due time arrives.
                     </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    className="flex-1 items-center rounded-lg border border-border py-3"
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      setIsDatePickerOpen(false);
-                      setIsTimePickerOpen((open) => !open);
-                    }}
-                  >
-                    <Text className="font-inter-semibold text-sm text-text-primary">
-                      {dueTimeLabel}
-                    </Text>
-                  </TouchableOpacity>
+                  ) : null}
                 </View>
+              )}
 
-                {isDatePickerOpen ? (
-                  <NativeDateTimePicker
-                    mode="date"
-                    value={pickedDate ?? new Date()}
-                    onValueChange={(_, date) => {
-                      setPickedDate(date);
-                      setIsDatePickerOpen(false);
-                    }}
-                    onDismiss={() => setIsDatePickerOpen(false)}
-                  />
-                ) : null}
-                {isTimePickerOpen ? (
-                  <NativeDateTimePicker
-                    mode="time"
-                    value={pickedTime ?? new Date()}
-                    onValueChange={(_, date) => {
-                      setPickedTime(date);
-                      setIsTimePickerOpen(false);
-                    }}
-                    onDismiss={() => setIsTimePickerOpen(false)}
-                  />
-                ) : null}
-              </View>
+              {isRecurring ? (
+                <RecurrenceFields draft={recurrenceDraft} onChange={setRecurrenceDraft} />
+              ) : (
+                <View className="gap-1">
+                  <Text className="font-inter-medium text-sm text-text-primary">Due</Text>
+                  {task ? null : (
+                    <Text className="font-inter text-xs text-text-secondary">
+                      Leave blank to default to the end of today.
+                    </Text>
+                  )}
+                  <View className="flex-row gap-3">
+                    <TouchableOpacity
+                      className="flex-1 items-center rounded-lg border border-border py-3"
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        setIsTimePickerOpen(false);
+                        setIsDatePickerOpen((open) => !open);
+                      }}
+                    >
+                      <Text className="font-inter-semibold text-sm text-text-primary">
+                        {dueDateLabel}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      className="flex-1 items-center rounded-lg border border-border py-3"
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        setIsDatePickerOpen(false);
+                        setIsTimePickerOpen((open) => !open);
+                      }}
+                    >
+                      <Text className="font-inter-semibold text-sm text-text-primary">
+                        {dueTimeLabel}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {isDatePickerOpen ? (
+                    <NativeDateTimePicker
+                      mode="date"
+                      // Riyadh's today, not the device's — the same "today"
+                      // an unpicked date resolves to in `resolveDueAt`.
+                      value={pickedDate ?? isoDateToPickerDate(getTodayIsoDate())}
+                      onValueChange={(_, date) => {
+                        setPickedDate(date);
+                        setIsDatePickerOpen(false);
+                      }}
+                      onDismiss={() => setIsDatePickerOpen(false)}
+                    />
+                  ) : null}
+                  {isTimePickerOpen ? (
+                    <NativeDateTimePicker
+                      mode="time"
+                      value={pickedTime ?? new Date()}
+                      onValueChange={(_, date) => {
+                        setPickedTime(date);
+                        setIsTimePickerOpen(false);
+                      }}
+                      onDismiss={() => setIsTimePickerOpen(false)}
+                    />
+                  ) : null}
+                </View>
+              )}
 
               <View className="gap-1">
                 <Text className="font-inter-medium text-sm text-text-primary">

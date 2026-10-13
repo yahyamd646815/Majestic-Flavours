@@ -1,6 +1,6 @@
 /// <reference types="jest" />
 
-import { getEndOfDayRiyadhIso, riyadhDateTimeToIso } from "@/lib/reports";
+import { getEndOfDayRiyadhIso, getRiyadhIsoDate, riyadhDateTimeToIso } from "@/lib/reports";
 
 describe("riyadhDateTimeToIso", () => {
   it("converts Riyadh wall-clock components to the equivalent UTC instant", () => {
@@ -17,5 +17,17 @@ describe("riyadhDateTimeToIso", () => {
 describe("getEndOfDayRiyadhIso", () => {
   it("resolves to 23:59 Riyadh (20:59 UTC) on the given date", () => {
     expect(getEndOfDayRiyadhIso("2026-07-12")).toBe("2026-07-12T20:59:00.000Z");
+  });
+});
+
+describe("getRiyadhIsoDate", () => {
+  it("reads the Riyadh calendar date of a UTC instant", () => {
+    // 11:30 UTC on 12 Jul is 14:30 Riyadh the same day.
+    expect(getRiyadhIsoDate(Date.parse("2026-07-12T11:30:00.000Z"))).toBe("2026-07-12");
+  });
+
+  it("rolls forward into the next Riyadh day for a late-UTC instant", () => {
+    // 21:30 UTC on 11 Jul is already 00:30 on 12 Jul in Riyadh.
+    expect(getRiyadhIsoDate(Date.parse("2026-07-11T21:30:00.000Z"))).toBe("2026-07-12");
   });
 });

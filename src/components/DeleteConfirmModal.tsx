@@ -9,6 +9,7 @@ type DeleteConfirmModalProps = {
   visible: boolean;
   onCancel: () => void;
   onConfirm: () => void;
+  warningMessage?: string;
 };
 
 /**
@@ -16,7 +17,12 @@ type DeleteConfirmModalProps = {
  * Rule: a native "are you sure" alert, then a modal requiring the exact word
  * DELETE before the action can proceed.
  */
-export function DeleteConfirmModal({ visible, onCancel, onConfirm }: DeleteConfirmModalProps) {
+export function DeleteConfirmModal({
+  visible,
+  onCancel,
+  onConfirm,
+  warningMessage,
+}: DeleteConfirmModalProps) {
   const [showTypeStep, setShowTypeStep] = useState(false);
   const [confirmText, setConfirmText] = useState("");
 
@@ -26,7 +32,7 @@ export function DeleteConfirmModal({ visible, onCancel, onConfirm }: DeleteConfi
     // here — this effect only needs to fire the native alert on open.
     if (!visible) return;
 
-    Alert.alert("Are you sure you want to delete this?", undefined, [
+    Alert.alert(warningMessage ?? "Are you sure you want to delete this?", undefined, [
       { text: "Cancel", style: "cancel", onPress: onCancel },
       { text: "Confirm", style: "destructive", onPress: () => setShowTypeStep(true) },
     ]);

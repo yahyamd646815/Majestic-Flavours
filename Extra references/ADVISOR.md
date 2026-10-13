@@ -101,6 +101,8 @@ Both were caught by auditing before running, and both prompts were rewritten. **
 
 **Never assert repo state as fact inside a prompt.** Prompt 16b told Claude Code that `tsconfig.json` already excluded `**/__tests__/*`. It did not — that was true of an older version of the file. Claude Code checked, found otherwise, and adapted correctly, but the prompt was wrong.
 
+**This applies with extra force to sibling files in a bundle Yahya can run in any order.** When several independent prompts reference the same file or component (`v2-03-a2`'s Parts E/F/G/NativeWind cleanup all touched task-category UI), naming a specific file/state in one prompt is a bet on what order the others ran in. CodeRabbit caught this for real: the NativeWind cleanup prompt named `TaskCategoryFormModal.tsx` specifically, but Part G (run first) had already renamed it to `TaskCategoryManagerModal.tsx`. Claude Code adapted correctly, but the prompt itself should have said "verify the current name/state of the category-management component" rather than asserting one — especially when Yahya's explicitly been told he can run siblings in whatever order suits him.
+
 ```
 // INCORRECT — asserts a fact that may no longer be true
 "tsconfig.json already excludes **/__tests__/* from typechecking."

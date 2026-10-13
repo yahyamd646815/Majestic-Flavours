@@ -17,6 +17,7 @@ function mapDbItemToItem(row: Record<string, unknown>): InventoryItem {
     minThreshold: row.min_threshold as number,
     assignedEmployeeIds: (row.assigned_employee_ids as string[]) ?? [],
     statusOverride: (row.status_override as StockStatus | null) ?? null,
+    statusUpdatedAt: row.status_updated_at as string,
     createdAt: row.created_at as string,
   };
 }
@@ -48,15 +49,19 @@ type InventoryState = {
   fetchAll: (supabase: SupabaseClient) => Promise<void>;
   /** `statusOverride` is excluded for the same reason `assignedEmployeeIds`
    * is excluded from `updateItem`: nothing outside a report ping may set it.
-   * A new row simply gets `NULL` from the database. */
+   * A new row simply gets `NULL` from the database. `statusUpdatedAt` is
+   * excluded because the database defaults it to `now()` on insert. */
   addItem: (
     supabase: SupabaseClient,
-    item: Omit<InventoryItem, "id" | "createdAt" | "statusOverride">,
+    item: Omit<InventoryItem, "id" | "createdAt" | "statusOverride" | "statusUpdatedAt">,
   ) => Promise<boolean>;
+  /** `statusUpdatedAt` is derived here, not passed in — see the write below. */
   updateItem: (
     supabase: SupabaseClient,
     id: string,
-    updates: Partial<Omit<InventoryItem, "id" | "createdAt" | "assignedEmployeeIds">>,
+    updates: Partial<
+      Omit<InventoryItem, "id" | "createdAt" | "assignedEmployeeIds" | "statusUpdatedAt">
+    >,
   ) => Promise<boolean>;
   deleteItem: (supabase: SupabaseClient, id: string) => Promise<boolean>;
   addEmployeeToItem: (
@@ -172,6 +177,16 @@ export const useInventoryStore = create<InventoryState>()((set, get) => ({
         : updates.statusOverride;
     if (effectiveStatusOverride !== undefined)
       dbUpdates.status_override = effectiveStatusOverride;
+
+    // The Dashboard's elapsed-time timer measures from here. It belongs in
+    // this function for the same reason the override-clearing logic above
+    // does: `updateItem` is the one path both `currentQuantity` and
+    // `statusOverride` writes funnel through, so stamping it here can't be
+    // bypassed. It deliberately does not care which of the two produced the
+    // new status — a ping and a quantity edit both restart the clock — but a
+    // name/category/unit/threshold-only edit leaves it untouched.
+    if (updates.currentQuantity !== undefined || updates.statusOverride !== undefined)
+      dbUpdates.status_updated_at = new Date().toISOString();
 
     const { data, error } = await supabase
       .from("inventory_items")

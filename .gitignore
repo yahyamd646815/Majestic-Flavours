@@ -45,3 +45,5 @@ example
 
 
 .tmp.driveupload/
+
+supabase/.temp/

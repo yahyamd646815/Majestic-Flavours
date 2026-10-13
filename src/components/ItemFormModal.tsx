@@ -10,8 +10,12 @@ import { useUnitsStore } from "@/store/unitsStore";
 import type { InventoryItem } from "@/types/inventory";
 
 /** `statusOverride` is excluded deliberately: there is no ping control in the
- * item form, and nothing but a report ping may set it. */
-export type ItemFormValues = Omit<InventoryItem, "id" | "createdAt" | "statusOverride">;
+ * item form, and nothing but a report ping may set it. `statusUpdatedAt` is
+ * excluded for the same reason — `updateItem` derives it, never the form. */
+export type ItemFormValues = Omit<
+  InventoryItem,
+  "id" | "createdAt" | "statusOverride" | "statusUpdatedAt"
+>;
 
 type ItemFormModalProps = {
   visible: boolean;

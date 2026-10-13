@@ -2,7 +2,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { create } from "zustand";
 
 import { generateId, slugify } from "@/lib/id";
-import { hasEmployeeResponded } from "@/lib/tasks";
+import { getDelayErrorMessage, hasEmployeeResponded } from "@/lib/tasks";
+import { useTaskReminderStore } from "@/store/taskReminderStore";
+import { useTaskRecurrenceStore } from "@/store/taskRecurrenceStore";
 import type { Task, TaskCategory, TaskCompletionStatus } from "@/types/tasks";
 
 /**
@@ -24,6 +26,11 @@ function mapDbTaskToTask(row: Record<string, unknown>): Task {
     dueAt: row.due_at as string,
     createdBy: row.created_by as string,
     createdAt: row.created_at as string,
+    generatedFromRecurrenceRuleId:
+      (row.generated_from_recurrence_rule_id as string | null) ?? null,
+    originalDueAt: (row.original_due_at as string | null) ?? null,
+    delayedAt: (row.delayed_at as string | null) ?? null,
+    delayedBy: (row.delayed_by as string | null) ?? null,
     assignedEmployeeIds: assignmentRows.map((a) => a.employee_clerk_id as string),
     completions: completionRows.map((c) => ({
       employeeClerkId: c.employee_clerk_id as string,
@@ -44,6 +51,10 @@ export type NewTaskValues = {
   assignedEmployeeIds: string[];
   createdBy: string;
 };
+
+/** What `delayTask` hands back to the UI: either it worked, or a short message
+ * that is safe to show a person as-is. */
+export type DelayTaskResult = { ok: true } | { ok: false; message: string };
 
 /**
  * An in-memory cache of whatever Supabase last returned, same contract as
@@ -76,7 +87,10 @@ type TaskState = {
   addTask: (supabase: SupabaseClient, values: NewTaskValues) => Promise<boolean>;
   /** Scalar columns only. Assignment changes never travel through here — they
    * go one at a time through `addAssignment`/`removeAssignment`, so an edit
-   * can't clobber a chip someone removed from `TaskCard` in the meantime. */
+   * can't clobber a chip someone removed from `TaskCard` in the meantime.
+   *
+   * A changed `dueAt` also moves every reminder this device holds on the task,
+   * since a reminder is "N hours before due" rather than a fixed instant. */
   updateTask: (
     supabase: SupabaseClient,
     id: string,
@@ -103,10 +117,34 @@ type TaskState = {
     status: TaskCompletionStatus,
     note: string,
   ) => Promise<boolean>;
-  /** Who may actually delete is enforced by `tasks_delete_permission` in SQL
+  /**
+   * Delays a task through the `delay_task` RPC. The new due time is computed
+   * and written entirely on the server (`internal.delayed_due_at`) — nothing
+   * about it is sent from here, and `updateTask` is deliberately not involved,
+   * since employees have no UPDATE permission on `tasks` at all.
+   *
+   * The RPC enforces assignment, not-completed, not-overdue and
+   * not-already-delayed; the caller mirrors them with `canDelayTask` only to
+   * hide the button.
+   *
+   * On success the cached task is replaced by the returned row and this
+   * device's reminders on it are re-derived against the new due time, exactly
+   * as `updateTask` does for an edited due date. Other assignees' devices do
+   * the same on their next session start, like they do for an edit.
+   */
+  delayTask: (supabase: SupabaseClient, taskId: string) => Promise<DelayTaskResult>;
+  /**
+   * Who may actually delete is enforced by `tasks_delete_permission` in SQL
    * (admin: any task; manager: only their own) — this just fires the delete
    * and trusts RLS to reject anything it shouldn't allow. The UI decides
-   * separately whether to even offer the option (see `tasks.tsx`). */
+   * separately whether to even offer the option (see `tasks.tsx`).
+   *
+   * Deleting a generated occurrence also cancels the recurring rule behind
+   * it, so the series stops for good. No extra permission check is needed for
+   * that step: an occurrence's `createdBy` is copied from its rule's, so
+   * anyone `tasks_delete_permission` lets delete the occurrence is someone
+   * `task_recurrence_rules_delete_staff` lets delete the rule.
+   */
   deleteTask: (supabase: SupabaseClient, id: string) => Promise<boolean>;
 };
 
@@ -197,7 +235,10 @@ export const useTaskStore = create<TaskState>()((set, get) => ({
   },
 
   addTask: async (supabase, values) => {
-    if (values.assignedEmployeeIds.length === 0) return false;
+    if (values.assignedEmployeeIds.length === 0) {
+      console.warn("[taskStore] addTask refused: no assignees given.");
+      return false;
+    }
 
     const id = generateId("task");
     const { data, error } = await supabase
@@ -213,7 +254,10 @@ export const useTaskStore = create<TaskState>()((set, get) => ({
       .select()
       .single();
 
-    if (error || !data) return false;
+    if (error || !data) {
+      console.warn(`[taskStore] Could not create task ${id}:`, error);
+      return false;
+    }
 
     const { error: assignError } = await supabase.from("task_assignments").insert(
       values.assignedEmployeeIds.map((employeeClerkId) => ({
@@ -224,7 +268,10 @@ export const useTaskStore = create<TaskState>()((set, get) => ({
     // The task row was created but assignment failed — surfaced as an overall
     // failure so the admin sees an error rather than a silently-unassigned
     // task quietly appearing in the list.
-    if (assignError) return false;
+    if (assignError) {
+      console.warn(`[taskStore] Task ${id} was created but not assigned:`, assignError);
+      return false;
+    }
 
     set((state) => ({
       tasks: [
@@ -237,6 +284,14 @@ export const useTaskStore = create<TaskState>()((set, get) => ({
           dueAt: data.due_at as string,
           createdBy: data.created_by as string,
           createdAt: data.created_at as string,
+          // Hand-created, so it belongs to no rule. Generated occurrences are
+          // never added through here — they go straight to Supabase and are
+          // picked up by the next `fetchAll` (see `insertOccurrences`).
+          generatedFromRecurrenceRuleId: null,
+          // A brand-new task has never been delayed.
+          originalDueAt: null,
+          delayedAt: null,
+          delayedBy: null,
           assignedEmployeeIds: values.assignedEmployeeIds,
           completions: [],
         },
@@ -265,24 +320,37 @@ export const useTaskStore = create<TaskState>()((set, get) => ({
       .select()
       .single();
 
-    if (error || !data) return false;
+    if (error || !data) {
+      console.warn(`[taskStore] Could not update task ${id}:`, error);
+      return false;
+    }
 
     // Only the scalar columns are merged in: this response deliberately
     // doesn't request the `task_assignments` / `task_completions` embeds, so
     // the cached ones are carried forward rather than blanked out.
+    const existing = get().tasks.find((task) => task.id === id);
+    const updated: Task | null = existing
+      ? {
+          ...existing,
+          categoryId: data.category_id as string,
+          title: data.title as string,
+          description: (data.description as string | null) ?? null,
+          dueAt: data.due_at as string,
+        }
+      : null;
+
     set((state) => ({
-      tasks: state.tasks.map((task) =>
-        task.id === id
-          ? {
-              ...task,
-              categoryId: data.category_id as string,
-              title: data.title as string,
-              description: (data.description as string | null) ?? null,
-              dueAt: data.due_at as string,
-            }
-          : task,
-      ),
+      tasks: state.tasks.map((task) => (task.id === id && updated ? updated : task)),
     }));
+
+    // A reminder fires relative to the due time, so moving the due date has
+    // to move every reminder on the task with it — otherwise they keep firing
+    // against the date they were set on. Only this device's own reminders can
+    // be rescheduled here; anyone else's are re-derived on their next session
+    // start, since their preference rows are untouched by this edit.
+    if (updates.dueAt !== undefined && updated !== null) {
+      await useTaskReminderStore.getState().rescheduleForTask(updated);
+    }
     return true;
   },
 
@@ -299,7 +367,13 @@ export const useTaskStore = create<TaskState>()((set, get) => ({
         { onConflict: "task_id,employee_clerk_id", ignoreDuplicates: true },
       );
 
-    if (error) return false;
+    if (error) {
+      console.warn(
+        `[taskStore] Could not assign ${employeeClerkId} to task ${taskId}:`,
+        error,
+      );
+      return false;
+    }
     set((state) => ({
       tasks: state.tasks.map((task) =>
         task.id === taskId && !task.assignedEmployeeIds.includes(employeeClerkId)
@@ -320,7 +394,13 @@ export const useTaskStore = create<TaskState>()((set, get) => ({
       .eq("task_id", taskId)
       .eq("employee_clerk_id", employeeClerkId);
 
-    if (error) return false;
+    if (error) {
+      console.warn(
+        `[taskStore] Could not unassign ${employeeClerkId} from task ${taskId}:`,
+        error,
+      );
+      return false;
+    }
     set((state) => ({
       tasks: state.tasks.map((task) =>
         task.id === taskId
@@ -333,25 +413,61 @@ export const useTaskStore = create<TaskState>()((set, get) => ({
           : task,
       ),
     }));
+
+    // Nobody should be reminded about a task that is no longer theirs — all of
+    // their reminders on it go, not just one, now that a person can hold
+    // several. A no-op unless this device actually holds reminders for that
+    // exact pair — and since `taskReminderStore` only ever caches the
+    // signed-in person's own rows, a match means it is their own assignment
+    // being removed, which is the only case this device can clean up anyway.
+    const forgotten = await useTaskReminderStore
+      .getState()
+      .deleteRemindersForTask(supabase, taskId, employeeClerkId);
+    if (!forgotten) {
+      console.warn(
+        `[taskStore] Unassigned ${employeeClerkId} from task ${taskId} but could not delete their reminders on it.`,
+      );
+    }
     return true;
   },
 
   completeTask: async (supabase, taskId, employeeClerkId, status, note) => {
+    // Every rejection below is logged, not just the Supabase one: three of the
+    // four ways this can fail never reach the network at all, so an unlogged
+    // `false` from here is indistinguishable from a connection problem — which
+    // is exactly the hole that made a real completion failure undiagnosable.
     const trimmedNote = note.trim();
     // The DB's `missed_requires_note` constraint is the real backstop; this
     // mirrors it client-side so a failed insert never reaches the network.
-    if (status === "missed" && trimmedNote.length === 0) return false;
+    if (status === "missed" && trimmedNote.length === 0) {
+      console.warn(`[taskStore] Completion refused for task ${taskId}: a miss needs a reason.`);
+      return false;
+    }
 
     const task = get().tasks.find((candidate) => candidate.id === taskId);
-    if (!task) return false;
+    if (!task) {
+      console.warn(`[taskStore] Completion refused: task ${taskId} is not in the store.`);
+      return false;
+    }
     // Mirrors `task_completions_insert_own`: you may record only your own
     // response, and only on a task you are actually assigned to. RLS is what
     // truly enforces this — the fix for an Admin needing to resolve a task
     // they were never assigned to is deleting it, not an override here.
-    if (!task.assignedEmployeeIds.includes(employeeClerkId)) return false;
+    if (!task.assignedEmployeeIds.includes(employeeClerkId)) {
+      console.warn(
+        `[taskStore] Completion refused: ${employeeClerkId} is not assigned to task ${taskId}. Assigned:`,
+        task.assignedEmployeeIds,
+      );
+      return false;
+    }
     // `(task_id, employee_clerk_id)` is the primary key, so responding twice
     // is a constraint violation rather than an update.
-    if (hasEmployeeResponded(task, employeeClerkId)) return false;
+    if (hasEmployeeResponded(task, employeeClerkId)) {
+      console.warn(
+        `[taskStore] Completion refused: ${employeeClerkId} has already responded to task ${taskId}.`,
+      );
+      return false;
+    }
 
     const { data, error } = await supabase
       .from("task_completions")
@@ -364,7 +480,13 @@ export const useTaskStore = create<TaskState>()((set, get) => ({
       .select()
       .single();
 
-    if (error || !data) return false;
+    if (error || !data) {
+      console.warn(
+        `[taskStore] Could not record ${status} for ${employeeClerkId} on task ${taskId}:`,
+        error,
+      );
+      return false;
+    }
 
     set((state) => ({
       tasks: state.tasks.map((existing) =>
@@ -387,10 +509,77 @@ export const useTaskStore = create<TaskState>()((set, get) => ({
     return true;
   },
 
+  delayTask: async (supabase, taskId) => {
+    const { data, error } = await supabase.rpc("delay_task", { target_task_id: taskId });
+
+    if (error || !data) {
+      console.warn(`[taskStore] Could not delay task ${taskId}:`, error);
+      return { ok: false, message: getDelayErrorMessage(error?.message) };
+    }
+
+    const row = data as Record<string, unknown>;
+    // Same merge as `updateTask`: the RPC returns the bare `tasks` row without
+    // the assignment / completion embeds, so only the columns a delay changes
+    // are taken from it and the cached embeds are carried forward.
+    const existing = get().tasks.find((task) => task.id === taskId);
+    const updated: Task | null = existing
+      ? {
+          ...existing,
+          dueAt: row.due_at as string,
+          originalDueAt: (row.original_due_at as string | null) ?? null,
+          delayedAt: (row.delayed_at as string | null) ?? null,
+          delayedBy: (row.delayed_by as string | null) ?? null,
+        }
+      : null;
+
+    set((state) => ({
+      tasks: state.tasks.map((task) => (task.id === taskId && updated ? updated : task)),
+    }));
+
+    // A reminder fires relative to the due time, so every change to `due_at`
+    // goes through the rescheduling path — same as `updateTask`.
+    if (updated !== null) {
+      await useTaskReminderStore.getState().rescheduleForTask(updated);
+    }
+    return { ok: true };
+  },
+
   deleteTask: async (supabase, id) => {
+    // Read before the delete — afterwards the row is gone from the cache and
+    // there is nothing left to learn the rule id from.
+    const ruleId = get().tasks.find((task) => task.id === id)?.generatedFromRecurrenceRuleId;
+
     const { error } = await supabase.from("tasks").delete().eq("id", id);
     if (error) return false;
     set((state) => ({ tasks: state.tasks.filter((task) => task.id !== id) }));
+
+    // The task's `task_reminders` rows went with it (`on delete cascade`), so
+    // only the device-local scheduled notification is left to cancel —
+    // nothing should fire for a task that no longer exists.
+    await useTaskReminderStore.getState().forgetTask(id);
+
+    // Deleting one occurrence of a recurring task cancels the whole series:
+    // nothing further is ever generated from the rule that produced it. Other
+    // occurrences already generated are left completely alone —
+    // `tasks.generated_from_recurrence_rule_id` is `on delete set null`, so
+    // they simply stop pointing at a rule and otherwise stay exactly as they
+    // were. This is on top of `deleteRule`'s own behaviour, not a change to
+    // it.
+    //
+    // Two writes with no transaction between them, deliberately — the same
+    // trade-off already accepted for the queued "make task mutations atomic"
+    // work. The task really is deleted either way, so a failure on the second
+    // step is warned about rather than reported as a failed delete, which
+    // would be untrue and would leave the list showing a task that is gone.
+    if (ruleId) {
+      const cancelled = await useTaskRecurrenceStore.getState().deleteRule(supabase, ruleId);
+      if (!cancelled) {
+        console.warn(
+          `[taskStore] Deleted occurrence ${id} but could not cancel recurrence rule ${ruleId} — it will keep generating.`,
+        );
+      }
+    }
+
     return true;
   },
 }));
