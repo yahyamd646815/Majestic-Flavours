@@ -378,3 +378,65 @@ export function isCompletedTaskPastItsDay(
   if (Number.isNaN(completedMs)) return false;
   return getRiyadhIsoDate(completedMs) < getRiyadhIsoDate(nowMs);
 }
+
+// ----------------------------------------------------------------------
+// Dashboard — today's tasks
+// ----------------------------------------------------------------------
+
+export type TodayTaskBuckets = {
+  upcoming: Task[];
+  delayed: Task[];
+  missed: Task[];
+};
+
+/**
+ * Splits today's unfinished tasks into the Dashboard's three sections.
+ *
+ * A task is a candidate for "today" when its `dueAt` falls on today's Riyadh
+ * date, or it was delayed and its `originalDueAt` does — the second clause
+ * keeps a task visible tomorrow morning if it was delayed from today to 10:00
+ * tomorrow. Completed tasks are excluded. Each remaining candidate lands in
+ * exactly one bucket, checked in this order:
+ * 1. Missed — past due and still listed for this viewer (a task that is
+ *    missed *and* was delayed goes here, not under Delayed);
+ * 2. Delayed — delayed, and its due time has not passed;
+ * 3. Upcoming — everything else.
+ *
+ * A past-due candidate that `isMissedTaskHiddenForViewer` hides (every
+ * assignee gave a reason, or older than 48h) appears in no bucket, so the
+ * Dashboard and the Tasks page never disagree. Each bucket is sorted by its
+ * current due time, soonest first.
+ */
+export function getTodayTaskBuckets(
+  tasks: Task[],
+  viewerClerkId: string,
+  nowMs: number,
+): TodayTaskBuckets {
+  const todayIsoDate = getRiyadhIsoDate(nowMs);
+  const buckets: TodayTaskBuckets = { upcoming: [], delayed: [], missed: [] };
+
+  for (const task of tasks) {
+    if (isTaskFullyCompleted(task)) continue;
+
+    const isDueToday = dueAtRiyadhIsoDate(task.dueAt) === todayIsoDate;
+    const wasDueToday =
+      task.delayedAt !== null &&
+      task.originalDueAt !== null &&
+      dueAtRiyadhIsoDate(task.originalDueAt) === todayIsoDate;
+    if (!isDueToday && !wasDueToday) continue;
+
+    if (isMissedTask(task, nowMs)) {
+      if (!isMissedTaskHiddenForViewer(task, viewerClerkId, nowMs)) buckets.missed.push(task);
+    } else if (task.delayedAt !== null) {
+      buckets.delayed.push(task);
+    } else {
+      buckets.upcoming.push(task);
+    }
+  }
+
+  const byDueAt = (a: Task, b: Task) => Date.parse(a.dueAt) - Date.parse(b.dueAt);
+  buckets.upcoming.sort(byDueAt);
+  buckets.delayed.sort(byDueAt);
+  buckets.missed.sort(byDueAt);
+  return buckets;
+}

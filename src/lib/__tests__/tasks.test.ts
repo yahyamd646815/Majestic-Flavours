@@ -11,6 +11,7 @@ import {
   formatDelayTargetLabel,
   getDelayErrorMessage,
   getDelayedDueAt,
+  getTodayTaskBuckets,
   hasEmployeeResponded,
   isMissedTask,
   isCompletedTaskPastItsDay,
@@ -22,7 +23,7 @@ import {
   matchesTaskDateFilter,
   resolveDueAt,
 } from "@/lib/tasks";
-import type { TaskCompletion } from "@/types/tasks";
+import type { Task, TaskCompletion } from "@/types/tasks";
 
 const DUE = "2026-01-01T00:00:00.000Z";
 const BEFORE_DUE = Date.parse("2025-12-31T00:00:00.000Z");
@@ -584,6 +585,164 @@ describe("isMissedTaskHiddenForViewer", () => {
     const newDueMs = Date.parse(task.dueAt);
     expect(isMissedTaskHiddenForViewer(task, A, newDueMs + 47 * HOUR_MS)).toBe(false);
     expect(isMissedTaskHiddenForViewer(task, A, newDueMs + 49 * HOUR_MS)).toBe(true);
+  });
+});
+
+describe("getTodayTaskBuckets", () => {
+  const VIEWER = "user_admin";
+  const A = "user_a";
+  const B = "user_b";
+  // 12:00 Riyadh on 2026-09-20.
+  const NOW = Date.parse("2026-09-20T09:00:00Z");
+
+  function task(overrides: Partial<Task> = {}): Task {
+    return {
+      id: "t1",
+      categoryId: "c1",
+      title: "Task",
+      description: null,
+      dueAt: "2026-09-20T11:00:00Z", // 14:00 Riyadh today
+      createdBy: VIEWER,
+      createdAt: "2026-09-19T00:00:00Z",
+      generatedFromRecurrenceRuleId: null,
+      originalDueAt: null,
+      delayedAt: null,
+      delayedBy: null,
+      assignedEmployeeIds: [A, B],
+      completions: [],
+      ...overrides,
+    };
+  }
+
+  /** Delayed from today 20:00 Riyadh to 10:00 Riyadh tomorrow. */
+  function delayedToTomorrow(): Task {
+    return task({
+      id: "delayed",
+      dueAt: "2026-09-21T07:00:00Z",
+      originalDueAt: "2026-09-20T17:00:00Z",
+      delayedAt: "2026-09-20T08:00:00Z",
+      delayedBy: A,
+    });
+  }
+
+  function ids(tasks: Task[]): string[] {
+    return tasks.map((t) => t.id);
+  }
+
+  it("puts a task due later today under Upcoming", () => {
+    const result = getTodayTaskBuckets([task()], VIEWER, NOW);
+    expect(ids(result.upcoming)).toEqual(["t1"]);
+    expect(result.delayed).toEqual([]);
+    expect(result.missed).toEqual([]);
+  });
+
+  it("puts a delayed task that is not yet due under Delayed", () => {
+    const delayed = task({
+      id: "d",
+      dueAt: "2026-09-20T20:59:00Z",
+      originalDueAt: "2026-09-20T11:00:00Z",
+      delayedAt: "2026-09-20T08:00:00Z",
+      delayedBy: A,
+    });
+    const result = getTodayTaskBuckets([delayed], VIEWER, NOW);
+    expect(ids(result.delayed)).toEqual(["d"]);
+    expect(result.upcoming).toEqual([]);
+    expect(result.missed).toEqual([]);
+  });
+
+  it("puts a task already past due today under Missed", () => {
+    const overdue = task({ id: "m", dueAt: "2026-09-20T05:00:00Z" });
+    const result = getTodayTaskBuckets([overdue], VIEWER, NOW);
+    expect(ids(result.missed)).toEqual(["m"]);
+  });
+
+  it("keeps a task delayed from today to tomorrow 10:00 under Delayed while viewed today", () => {
+    const result = getTodayTaskBuckets([delayedToTomorrow()], VIEWER, NOW);
+    expect(ids(result.delayed)).toEqual(["delayed"]);
+  });
+
+  it("still lists it tomorrow morning, before it is due, under Delayed", () => {
+    const tomorrowMorning = Date.parse("2026-09-21T06:00:00Z"); // 09:00 Riyadh
+    const result = getTodayTaskBuckets([delayedToTomorrow()], VIEWER, tomorrowMorning);
+    expect(ids(result.delayed)).toEqual(["delayed"]);
+  });
+
+  it("moves it to Missed, not Delayed, once it goes overdue tomorrow", () => {
+    const tomorrowAfterDue = Date.parse("2026-09-21T08:00:00Z"); // 11:00 Riyadh
+    const result = getTodayTaskBuckets([delayedToTomorrow()], VIEWER, tomorrowAfterDue);
+    expect(ids(result.missed)).toEqual(["delayed"]);
+    expect(result.delayed).toEqual([]);
+  });
+
+  it("excludes a completed task", () => {
+    const done = task({ completions: [completion(A, "completed")] });
+    const result = getTodayTaskBuckets([done], VIEWER, NOW);
+    expect(result).toEqual({ upcoming: [], delayed: [], missed: [] });
+  });
+
+  it("excludes a task due tomorrow", () => {
+    const tomorrow = task({ dueAt: "2026-09-21T11:00:00Z" });
+    const result = getTodayTaskBuckets([tomorrow], VIEWER, NOW);
+    expect(result).toEqual({ upcoming: [], delayed: [], missed: [] });
+  });
+
+  it("excludes a task due yesterday", () => {
+    const yesterday = task({ dueAt: "2026-09-19T11:00:00Z" });
+    const result = getTodayTaskBuckets([yesterday], VIEWER, NOW);
+    expect(result).toEqual({ upcoming: [], delayed: [], missed: [] });
+  });
+
+  it("treats the Riyadh midnight boundary as the day edge", () => {
+    // 00:30 Riyadh on the 21st is tomorrow; 23:59 on the 20th is still today.
+    const justAfterMidnight = task({ id: "after", dueAt: "2026-09-20T21:30:00Z" });
+    const lastMinute = task({ id: "last", dueAt: "2026-09-20T20:59:00Z" });
+    const result = getTodayTaskBuckets([justAfterMidnight, lastMinute], VIEWER, NOW);
+    expect(ids(result.upcoming)).toEqual(["last"]);
+  });
+
+  it("excludes a missed task once every assignee has given a reason", () => {
+    const allReasons = task({
+      dueAt: "2026-09-20T05:00:00Z",
+      completions: [completion(A, "missed", "Sick"), completion(B, "missed", "Busy")],
+    });
+    const result = getTodayTaskBuckets([allReasons], VIEWER, NOW);
+    expect(result).toEqual({ upcoming: [], delayed: [], missed: [] });
+  });
+
+  it("keeps a missed task while only some assignees have given a reason", () => {
+    const someReasons = task({
+      id: "some",
+      dueAt: "2026-09-20T05:00:00Z",
+      completions: [completion(A, "missed", "Sick")],
+    });
+    expect(ids(getTodayTaskBuckets([someReasons], VIEWER, NOW).missed)).toEqual(["some"]);
+  });
+
+  it("hides a missed task from an assignee who has already given their reason", () => {
+    const mine = task({
+      dueAt: "2026-09-20T05:00:00Z",
+      completions: [completion(A, "missed", "Sick")],
+    });
+    expect(getTodayTaskBuckets([mine], A, NOW).missed).toEqual([]);
+    expect(getTodayTaskBuckets([mine], B, NOW).missed).toHaveLength(1);
+  });
+
+  it("lists an unassigned missed task rather than hiding it at once", () => {
+    const unassigned = task({
+      id: "u",
+      dueAt: "2026-09-20T05:00:00Z",
+      assignedEmployeeIds: [],
+    });
+    expect(ids(getTodayTaskBuckets([unassigned], VIEWER, NOW).missed)).toEqual(["u"]);
+  });
+
+  it("sorts each bucket by due time, soonest first", () => {
+    const later = task({ id: "later", dueAt: "2026-09-20T18:00:00Z" });
+    const sooner = task({ id: "sooner", dueAt: "2026-09-20T10:00:00Z" });
+    expect(ids(getTodayTaskBuckets([later, sooner], VIEWER, NOW).upcoming)).toEqual([
+      "sooner",
+      "later",
+    ]);
   });
 });
 
