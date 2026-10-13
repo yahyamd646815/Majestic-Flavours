@@ -16,14 +16,18 @@ import { ONE_MINUTE_MS, useNowTick } from "@/hooks/useNowTick";
 import { formatElapsedSince } from "@/lib/elapsedTime";
 import { getAssignedNames } from "@/lib/getAssignedNames";
 import { getCategoryName, getUnitLabel } from "@/lib/inventoryLabels";
+import { formatDueDateTime, formatSnapshotTime, getRiyadhIsoDate } from "@/lib/reports";
 import { getEffectiveStatus } from "@/lib/stockStatus";
 import { useSupabaseClient } from "@/lib/supabase";
+import { dueAtRiyadhIsoDate, getTodayTaskBuckets } from "@/lib/tasks";
 import type { SyncedUser } from "@/store/appUsersStore";
 import { useAppUsersStore } from "@/store/appUsersStore";
 import { useInventoryStore } from "@/store/inventoryStore";
+import { useTaskStore } from "@/store/taskStore";
 import { useUnitsStore } from "@/store/unitsStore";
 import type { Category, InventoryItem, Unit } from "@/types/inventory";
 import { parseRole } from "@/types/role";
+import type { Task } from "@/types/tasks";
 
 /** Pinged items (manual override) first, quantity-derived items after, and
  * within each of those two groups most-recently-updated first — so the item
@@ -65,6 +69,9 @@ export default function Dashboard() {
   const unitsError = useUnitsStore((state) => state.error);
   const fetchUnits = useUnitsStore((state) => state.fetchAll);
   const getLowStockItems = useInventoryStore((state) => state.getLowStockItems);
+  // Already loaded for the whole session by `useSupabaseSync`; read only, no
+  // fetch of its own.
+  const tasks = useTaskStore((state) => state.tasks);
 
   const posthog = usePostHog();
   const hasCapturedLowStockView = useRef(false);
@@ -138,6 +145,11 @@ export default function Dashboard() {
   const lowStockAlertItems = sortPingedFirst(
     filteredAlertItems.filter((item) => getEffectiveStatus(item) === "low_stock"),
   );
+
+  // Deliberately not run through `selectedCategoryIds` — the category filter
+  // above is for stock only. Re-evaluated every `nowMs` tick, so an Upcoming
+  // task moves to Missed on its own.
+  const todayTasks = getTodayTaskBuckets(tasks, user?.id ?? "", nowMs);
 
   const combinedError = error ?? unitsError;
   const isEmptyAndLoading = (isLoading || unitsLoading) && items.length === 0;
@@ -242,11 +254,94 @@ export default function Dashboard() {
                   </CollapsibleSection>
                 </View>
               )}
+
+              <View className="gap-4">
+                <Text className="font-inter-bold text-lg text-maroon">Today&apos;s Tasks</Text>
+
+                <CollapsibleSection title="Upcoming" count={todayTasks.upcoming.length}>
+                  <TodayTaskList
+                    tasks={todayTasks.upcoming}
+                    emptyText="No upcoming tasks today."
+                    appUsers={appUsers}
+                    nowMs={nowMs}
+                  />
+                </CollapsibleSection>
+
+                <CollapsibleSection title="Delayed" count={todayTasks.delayed.length}>
+                  <TodayTaskList
+                    tasks={todayTasks.delayed}
+                    emptyText="No delayed tasks today."
+                    appUsers={appUsers}
+                    nowMs={nowMs}
+                  />
+                </CollapsibleSection>
+
+                <CollapsibleSection title="Missed" count={todayTasks.missed.length}>
+                  <TodayTaskList
+                    tasks={todayTasks.missed}
+                    emptyText="No missed tasks today."
+                    appUsers={appUsers}
+                    nowMs={nowMs}
+                  />
+                </CollapsibleSection>
+              </View>
             </View>
           </ScrollView>
         </>
       )}
     </SafeAreaView>
+  );
+}
+
+type TodayTaskListProps = {
+  tasks: Task[];
+  emptyText: string;
+  appUsers: SyncedUser[];
+  nowMs: number;
+};
+
+/** The body of one Today's Tasks section: read-only rows, or the empty state. */
+function TodayTaskList({ tasks, emptyText, appUsers, nowMs }: TodayTaskListProps) {
+  if (tasks.length === 0) {
+    return (
+      <Text className="py-2 text-center font-inter text-xs text-text-secondary">{emptyText}</Text>
+    );
+  }
+
+  const todayIsoDate = getRiyadhIsoDate(nowMs);
+
+  // Time alone when it falls today (the common case, and all the width a phone
+  // has); with the date when it doesn't, e.g. a task delayed to tomorrow 10:00,
+  // where a bare "10:00" would read as this morning.
+  function formatTaskTime(iso: string): string {
+    return dueAtRiyadhIsoDate(iso) === todayIsoDate ? formatSnapshotTime(iso) : formatDueDateTime(iso);
+  }
+
+  return (
+    <>
+      {tasks.map((task) => {
+        const assignedNames = getAssignedNames(task.assignedEmployeeIds, appUsers);
+        return (
+          <View key={task.id} className="card gap-1">
+            <Text className="font-inter-semibold text-base text-text-primary">{task.title}</Text>
+            <Text className="font-inter text-xs text-text-secondary">
+              Assigned: {assignedNames.length > 0 ? assignedNames.join(", ") : "Unassigned"}
+            </Text>
+            <View className="flex-row items-center gap-1.5">
+              <Ionicons name="time-outline" size={13} color={colors.textSecondary} />
+              <Text className="font-inter-semibold text-xs text-text-primary">
+                Due {formatTaskTime(task.dueAt)}
+              </Text>
+              {task.delayedAt !== null && task.originalDueAt !== null ? (
+                <Text className="font-inter text-xs text-text-secondary">
+                  (was {formatTaskTime(task.originalDueAt)})
+                </Text>
+              ) : null}
+            </View>
+          </View>
+        );
+      })}
+    </>
   );
 }
 

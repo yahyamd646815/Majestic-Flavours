@@ -1,11 +1,21 @@
 /// <reference types="jest" />
 
-import { getTodayIsoDate } from "@/lib/reports";
+import { formatReportDate, getEndOfDayRiyadhIso, getTodayIsoDate } from "@/lib/reports";
 import {
+  DELAY_FALLBACK_MESSAGE,
+  MISSED_VISIBILITY_WINDOW_MS,
+  canDelayTask,
   dueAtRiyadhIsoDate,
   dueAtToDatePickerValue,
   dueAtToTimePickerValue,
+  formatDelayTargetLabel,
+  getDelayErrorMessage,
+  getDelayedDueAt,
+  getTodayTaskBuckets,
   hasEmployeeResponded,
+  isMissedTask,
+  isCompletedTaskPastItsDay,
+  isMissedTaskHiddenForViewer,
   isTaskFullyCompleted,
   isTaskOverdueForEmployee,
   isTaskPastDue,
@@ -13,7 +23,7 @@ import {
   matchesTaskDateFilter,
   resolveDueAt,
 } from "@/lib/tasks";
-import type { TaskCompletion } from "@/types/tasks";
+import type { Task, TaskCompletion } from "@/types/tasks";
 
 const DUE = "2026-01-01T00:00:00.000Z";
 const BEFORE_DUE = Date.parse("2025-12-31T00:00:00.000Z");
@@ -310,5 +320,469 @@ describe("matchesTaskDateFilter", () => {
       expect(matchesTaskDateFilter("2026-12-31", "month", "2026-12-05")).toBe(true);
       expect(matchesTaskDateFilter("2027-01-01", "month", "2026-12-05")).toBe(false);
     });
+  });
+});
+
+describe("canDelayTask", () => {
+  const ME = "user_me";
+  const NOW = Date.parse("2026-09-20T08:00:00.000Z");
+  const LATER = "2026-09-20T11:00:00.000Z";
+
+  function delayable(
+    overrides: Partial<Parameters<typeof canDelayTask>[0]> = {},
+  ): Parameters<typeof canDelayTask>[0] {
+    return {
+      dueAt: LATER,
+      completions: [],
+      assignedEmployeeIds: [ME],
+      delayedAt: null,
+      ...overrides,
+    };
+  }
+
+  it("is true for an assignee on an open, not-yet-due, never-delayed task", () => {
+    expect(canDelayTask(delayable(), ME, NOW)).toBe(true);
+  });
+
+  it("is false for someone who is not assigned, whatever their role", () => {
+    expect(canDelayTask(delayable(), "user_other", NOW)).toBe(false);
+    expect(canDelayTask(delayable({ assignedEmployeeIds: [] }), ME, NOW)).toBe(false);
+  });
+
+  it("is false once anyone has completed it", () => {
+    const task = delayable({ completions: [completion("user_other", "completed")] });
+    expect(canDelayTask(task, ME, NOW)).toBe(false);
+  });
+
+  it("is false once it has already been delayed — one delay per task", () => {
+    expect(canDelayTask(delayable({ delayedAt: "2026-09-19T08:00:00.000Z" }), ME, NOW)).toBe(
+      false,
+    );
+  });
+
+  it("is false once overdue", () => {
+    expect(canDelayTask(delayable(), ME, Date.parse("2026-09-20T12:00:00.000Z"))).toBe(false);
+  });
+
+  it("treats a task due this exact instant as overdue, like the RPC's due_at <= now()", () => {
+    expect(canDelayTask(delayable(), ME, Date.parse(LATER))).toBe(false);
+    expect(canDelayTask(delayable(), ME, Date.parse(LATER) - 1)).toBe(true);
+  });
+
+  it("is false for an unparseable due time", () => {
+    expect(canDelayTask(delayable({ dueAt: "not-a-date" }), ME, NOW)).toBe(false);
+  });
+});
+
+describe("getDelayedDueAt", () => {
+  // Riyadh is UTC+3. These five cases are the same ones the SQL patch's own
+  // verification queries use, so the TypeScript mirror and `internal.delayed_due_at`
+  // are held to identical answers.
+  it.each([
+    ["14:00 Riyadh → 23:59 the same day", "2026-09-20T11:00:00.000Z", "2026-09-20T20:59:00.000Z"],
+    ["19:59 Riyadh → 23:59 the same day", "2026-09-20T16:59:00.000Z", "2026-09-20T20:59:00.000Z"],
+    ["20:00 Riyadh → 10:00 the next day", "2026-09-20T17:00:00.000Z", "2026-09-21T07:00:00.000Z"],
+    ["23:59 Riyadh → 10:00 the next day", "2026-09-20T20:59:00.000Z", "2026-09-21T07:00:00.000Z"],
+    [
+      "00:30 Riyadh on the 21st → 23:59 on the 21st",
+      "2026-09-20T21:30:00.000Z",
+      "2026-09-21T20:59:00.000Z",
+    ],
+  ])("%s", (_label, dueAt, expected) => {
+    expect(getDelayedDueAt(dueAt)).toBe(expected);
+  });
+
+  it("treats 19:59:59 as still before the 20:00 cutoff, like SQL's time < '20:00'", () => {
+    expect(getDelayedDueAt("2026-09-20T16:59:59.000Z")).toBe("2026-09-20T20:59:00.000Z");
+  });
+
+  it("rolls the 'next day' over a month end", () => {
+    // 20:30 Riyadh on 30 Sep → 10:00 on 1 Oct.
+    expect(getDelayedDueAt("2026-09-30T17:30:00.000Z")).toBe("2026-10-01T07:00:00.000Z");
+  });
+
+  it("rolls the 'next day' over a year end", () => {
+    expect(getDelayedDueAt("2026-12-31T18:00:00.000Z")).toBe("2027-01-01T07:00:00.000Z");
+  });
+
+  it("always lands strictly after the current due time", () => {
+    for (let hour = 0; hour < 24; hour += 1) {
+      const dueAt = new Date(Date.UTC(2026, 8, 20, hour, 0, 0)).toISOString();
+      const delayed = getDelayedDueAt(dueAt);
+      expect(delayed).not.toBeNull();
+      expect(Date.parse(delayed!)).toBeGreaterThan(Date.parse(dueAt));
+    }
+  });
+
+  it("returns null for an unparseable timestamp", () => {
+    expect(getDelayedDueAt("not-a-date")).toBeNull();
+  });
+
+  it("agrees with the app's own end of day, which is exactly 23:59:00.000 like the SQL", () => {
+    // If `getEndOfDayRiyadhIso` ever grew seconds or milliseconds, the SQL's
+    // flat 23:59:00 would silently disagree with it.
+    expect(getEndOfDayRiyadhIso("2026-09-20")).toBe("2026-09-20T20:59:00.000Z");
+    expect(getDelayedDueAt("2026-09-20T11:00:00.000Z")).toBe(getEndOfDayRiyadhIso("2026-09-20"));
+  });
+});
+
+describe("formatDelayTargetLabel", () => {
+  // Riyadh noon on 20 Sep 2026.
+  const NOW = Date.parse("2026-09-20T09:00:00.000Z");
+
+  it("says 'today' for 23:59 on Riyadh's current date", () => {
+    expect(formatDelayTargetLabel("2026-09-20T20:59:00.000Z", NOW)).toBe("11:59 PM today");
+  });
+
+  it("says 'tomorrow' for 10:00 on the next Riyadh date", () => {
+    expect(formatDelayTargetLabel("2026-09-21T07:00:00.000Z", NOW)).toBe("10:00 AM tomorrow");
+  });
+
+  it("names the date when the task is due further out than tomorrow", () => {
+    // The date half is `formatReportDate`'s, whose month abbreviation depends
+    // on the runtime's `en-GB` data ("Sep" vs "Sept") — so it is derived, not
+    // hardcoded.
+    expect(formatDelayTargetLabel("2026-09-25T20:59:00.000Z", NOW)).toBe(
+      `11:59 PM on ${formatReportDate("2026-09-25")}`,
+    );
+  });
+
+  it("measures 'today' by Riyadh's date, not UTC's", () => {
+    // 00:30 Riyadh on the 21st is still the 20th in UTC.
+    const justAfterRiyadhMidnight = Date.parse("2026-09-20T21:30:00.000Z");
+    expect(formatDelayTargetLabel("2026-09-21T20:59:00.000Z", justAfterRiyadhMidnight)).toBe(
+      "11:59 PM today",
+    );
+  });
+});
+
+describe("getDelayErrorMessage", () => {
+  it.each([
+    ["delay_task: not assigned", "You are not assigned to this task."],
+    ["delay_task: already delayed", "This task has already been delayed once."],
+    ["delay_task: already completed", "This task is already completed."],
+    ["delay_task: already overdue", "This task is already overdue, so it can't be delayed."],
+    ["delay_task: task not found", "This task no longer exists."],
+    ["delay_task: not signed in", "You are signed out. Sign in and try again."],
+  ])("maps %s to friendly text", (raw, expected) => {
+    expect(getDelayErrorMessage(raw)).toBe(expected);
+  });
+
+  it("falls back to the generic message for anything unrecognised", () => {
+    expect(getDelayErrorMessage("delay_task: something new")).toBe(DELAY_FALLBACK_MESSAGE);
+    expect(getDelayErrorMessage("TypeError: Network request failed")).toBe(DELAY_FALLBACK_MESSAGE);
+    expect(getDelayErrorMessage("not assigned")).toBe(DELAY_FALLBACK_MESSAGE);
+    expect(getDelayErrorMessage(undefined)).toBe(DELAY_FALLBACK_MESSAGE);
+    expect(getDelayErrorMessage("")).toBe(DELAY_FALLBACK_MESSAGE);
+  });
+});
+
+describe("isMissedTask", () => {
+  it("is false before the due time", () => {
+    expect(isMissedTask({ dueAt: DUE, completions: [] }, BEFORE_DUE)).toBe(false);
+  });
+
+  it("is true past the due time while nobody has completed it", () => {
+    expect(isMissedTask({ dueAt: DUE, completions: [] }, AFTER_DUE)).toBe(true);
+  });
+
+  it("is false once completed, however late", () => {
+    const task = { dueAt: DUE, completions: [completion("user_1", "completed")] };
+    expect(isMissedTask(task, AFTER_DUE)).toBe(false);
+  });
+});
+
+describe("isMissedTaskHiddenForViewer", () => {
+  const HOUR_MS = 60 * 60 * 1000;
+  const DUE_MS = Date.parse(DUE);
+  const A = "user_a";
+  const B = "user_b";
+  const ADMIN = "user_admin";
+
+  function missable(
+    overrides: Partial<Parameters<typeof isMissedTaskHiddenForViewer>[0]> = {},
+  ): Parameters<typeof isMissedTaskHiddenForViewer>[0] {
+    return { dueAt: DUE, completions: [], assignedEmployeeIds: [A, B], ...overrides };
+  }
+
+  it("never hides a task that is not yet due", () => {
+    expect(MISSED_VISIBILITY_WINDOW_MS).toBe(48 * HOUR_MS);
+    expect(isMissedTaskHiddenForViewer(missable(), A, BEFORE_DUE)).toBe(false);
+    expect(isMissedTaskHiddenForViewer(missable(), ADMIN, BEFORE_DUE)).toBe(false);
+  });
+
+  it("never hides a completed task, even one far past 48 hours", () => {
+    const task = missable({ completions: [completion(A, "completed")] });
+    const farLater = DUE_MS + 30 * 24 * HOUR_MS;
+    expect(isMissedTaskHiddenForViewer(task, A, farLater)).toBe(false);
+    expect(isMissedTaskHiddenForViewer(task, ADMIN, farLater)).toBe(false);
+  });
+
+  it("keeps a missed task nobody has responded to visible inside the 48 hours", () => {
+    const now = DUE_MS + 47 * HOUR_MS + 59 * 60 * 1000;
+    expect(isMissedTaskHiddenForViewer(missable(), A, now)).toBe(false);
+    expect(isMissedTaskHiddenForViewer(missable(), ADMIN, now)).toBe(false);
+  });
+
+  it("hides a missed task for everyone once it is past 48 hours", () => {
+    const now = DUE_MS + 48 * HOUR_MS + 60 * 1000;
+    expect(isMissedTaskHiddenForViewer(missable(), A, now)).toBe(true);
+    expect(isMissedTaskHiddenForViewer(missable(), ADMIN, now)).toBe(true);
+  });
+
+  it("still shows it at exactly 48 hours — the cut-off is strictly greater", () => {
+    const now = DUE_MS + 48 * HOUR_MS;
+    expect(isMissedTaskHiddenForViewer(missable(), A, now)).toBe(false);
+    expect(isMissedTaskHiddenForViewer(missable(), A, now + 1)).toBe(true);
+  });
+
+  it("hides it for an assignee as soon as they give a reason, but not for the other assignee", () => {
+    const task = missable({ completions: [completion(A, "missed", "Short-staffed")] });
+    expect(isMissedTaskHiddenForViewer(task, A, AFTER_DUE)).toBe(true);
+    expect(isMissedTaskHiddenForViewer(task, B, AFTER_DUE)).toBe(false);
+  });
+
+  describe("for a viewer who is not assigned", () => {
+    it("keeps it while no assignee has responded", () => {
+      expect(isMissedTaskHiddenForViewer(missable(), ADMIN, AFTER_DUE)).toBe(false);
+    });
+
+    it("keeps it while only some assignees have responded", () => {
+      const task = missable({ completions: [completion(A, "missed", "Short-staffed")] });
+      expect(isMissedTaskHiddenForViewer(task, ADMIN, AFTER_DUE)).toBe(false);
+    });
+
+    it("hides it once every assignee has responded", () => {
+      const task = missable({
+        completions: [completion(A, "missed", "Short-staffed"), completion(B, "missed", "Sick")],
+      });
+      expect(isMissedTaskHiddenForViewer(task, ADMIN, AFTER_DUE)).toBe(true);
+    });
+
+    it("is not satisfied by a response from someone who is not an assignee", () => {
+      const task = missable({ completions: [completion("user_stranger", "missed", "Hello")] });
+      expect(isMissedTaskHiddenForViewer(task, ADMIN, AFTER_DUE)).toBe(false);
+    });
+  });
+
+  describe("with no assignees", () => {
+    it("is not hidden the instant it goes overdue — 'every assignee responded' is vacuous", () => {
+      const task = missable({ assignedEmployeeIds: [] });
+      expect(isMissedTaskHiddenForViewer(task, ADMIN, DUE_MS + 1)).toBe(false);
+      expect(isMissedTaskHiddenForViewer(task, ADMIN, AFTER_DUE)).toBe(false);
+    });
+
+    it("still drops off once past 48 hours", () => {
+      const task = missable({ assignedEmployeeIds: [] });
+      expect(isMissedTaskHiddenForViewer(task, ADMIN, DUE_MS + 48 * HOUR_MS + 1)).toBe(true);
+    });
+  });
+
+  it("measures 48 hours from the delayed due time, not the original one", () => {
+    // Due 2026-01-01 at 10:00 Riyadh, delayed (before it went overdue) to the
+    // end of that day; the 48 hours run from the new, later `dueAt`.
+    const task = missable({ dueAt: "2026-01-01T20:59:00.000Z" });
+    const newDueMs = Date.parse(task.dueAt);
+    expect(isMissedTaskHiddenForViewer(task, A, newDueMs + 47 * HOUR_MS)).toBe(false);
+    expect(isMissedTaskHiddenForViewer(task, A, newDueMs + 49 * HOUR_MS)).toBe(true);
+  });
+});
+
+describe("getTodayTaskBuckets", () => {
+  const VIEWER = "user_admin";
+  const A = "user_a";
+  const B = "user_b";
+  // 12:00 Riyadh on 2026-09-20.
+  const NOW = Date.parse("2026-09-20T09:00:00Z");
+
+  function task(overrides: Partial<Task> = {}): Task {
+    return {
+      id: "t1",
+      categoryId: "c1",
+      title: "Task",
+      description: null,
+      dueAt: "2026-09-20T11:00:00Z", // 14:00 Riyadh today
+      createdBy: VIEWER,
+      createdAt: "2026-09-19T00:00:00Z",
+      generatedFromRecurrenceRuleId: null,
+      originalDueAt: null,
+      delayedAt: null,
+      delayedBy: null,
+      assignedEmployeeIds: [A, B],
+      completions: [],
+      ...overrides,
+    };
+  }
+
+  /** Delayed from today 20:00 Riyadh to 10:00 Riyadh tomorrow. */
+  function delayedToTomorrow(): Task {
+    return task({
+      id: "delayed",
+      dueAt: "2026-09-21T07:00:00Z",
+      originalDueAt: "2026-09-20T17:00:00Z",
+      delayedAt: "2026-09-20T08:00:00Z",
+      delayedBy: A,
+    });
+  }
+
+  function ids(tasks: Task[]): string[] {
+    return tasks.map((t) => t.id);
+  }
+
+  it("puts a task due later today under Upcoming", () => {
+    const result = getTodayTaskBuckets([task()], VIEWER, NOW);
+    expect(ids(result.upcoming)).toEqual(["t1"]);
+    expect(result.delayed).toEqual([]);
+    expect(result.missed).toEqual([]);
+  });
+
+  it("puts a delayed task that is not yet due under Delayed", () => {
+    const delayed = task({
+      id: "d",
+      dueAt: "2026-09-20T20:59:00Z",
+      originalDueAt: "2026-09-20T11:00:00Z",
+      delayedAt: "2026-09-20T08:00:00Z",
+      delayedBy: A,
+    });
+    const result = getTodayTaskBuckets([delayed], VIEWER, NOW);
+    expect(ids(result.delayed)).toEqual(["d"]);
+    expect(result.upcoming).toEqual([]);
+    expect(result.missed).toEqual([]);
+  });
+
+  it("puts a task already past due today under Missed", () => {
+    const overdue = task({ id: "m", dueAt: "2026-09-20T05:00:00Z" });
+    const result = getTodayTaskBuckets([overdue], VIEWER, NOW);
+    expect(ids(result.missed)).toEqual(["m"]);
+  });
+
+  it("keeps a task delayed from today to tomorrow 10:00 under Delayed while viewed today", () => {
+    const result = getTodayTaskBuckets([delayedToTomorrow()], VIEWER, NOW);
+    expect(ids(result.delayed)).toEqual(["delayed"]);
+  });
+
+  it("still lists it tomorrow morning, before it is due, under Delayed", () => {
+    const tomorrowMorning = Date.parse("2026-09-21T06:00:00Z"); // 09:00 Riyadh
+    const result = getTodayTaskBuckets([delayedToTomorrow()], VIEWER, tomorrowMorning);
+    expect(ids(result.delayed)).toEqual(["delayed"]);
+  });
+
+  it("moves it to Missed, not Delayed, once it goes overdue tomorrow", () => {
+    const tomorrowAfterDue = Date.parse("2026-09-21T08:00:00Z"); // 11:00 Riyadh
+    const result = getTodayTaskBuckets([delayedToTomorrow()], VIEWER, tomorrowAfterDue);
+    expect(ids(result.missed)).toEqual(["delayed"]);
+    expect(result.delayed).toEqual([]);
+  });
+
+  it("excludes a completed task", () => {
+    const done = task({ completions: [completion(A, "completed")] });
+    const result = getTodayTaskBuckets([done], VIEWER, NOW);
+    expect(result).toEqual({ upcoming: [], delayed: [], missed: [] });
+  });
+
+  it("excludes a task due tomorrow", () => {
+    const tomorrow = task({ dueAt: "2026-09-21T11:00:00Z" });
+    const result = getTodayTaskBuckets([tomorrow], VIEWER, NOW);
+    expect(result).toEqual({ upcoming: [], delayed: [], missed: [] });
+  });
+
+  it("excludes a task due yesterday", () => {
+    const yesterday = task({ dueAt: "2026-09-19T11:00:00Z" });
+    const result = getTodayTaskBuckets([yesterday], VIEWER, NOW);
+    expect(result).toEqual({ upcoming: [], delayed: [], missed: [] });
+  });
+
+  it("treats the Riyadh midnight boundary as the day edge", () => {
+    // 00:30 Riyadh on the 21st is tomorrow; 23:59 on the 20th is still today.
+    const justAfterMidnight = task({ id: "after", dueAt: "2026-09-20T21:30:00Z" });
+    const lastMinute = task({ id: "last", dueAt: "2026-09-20T20:59:00Z" });
+    const result = getTodayTaskBuckets([justAfterMidnight, lastMinute], VIEWER, NOW);
+    expect(ids(result.upcoming)).toEqual(["last"]);
+  });
+
+  it("excludes a missed task once every assignee has given a reason", () => {
+    const allReasons = task({
+      dueAt: "2026-09-20T05:00:00Z",
+      completions: [completion(A, "missed", "Sick"), completion(B, "missed", "Busy")],
+    });
+    const result = getTodayTaskBuckets([allReasons], VIEWER, NOW);
+    expect(result).toEqual({ upcoming: [], delayed: [], missed: [] });
+  });
+
+  it("keeps a missed task while only some assignees have given a reason", () => {
+    const someReasons = task({
+      id: "some",
+      dueAt: "2026-09-20T05:00:00Z",
+      completions: [completion(A, "missed", "Sick")],
+    });
+    expect(ids(getTodayTaskBuckets([someReasons], VIEWER, NOW).missed)).toEqual(["some"]);
+  });
+
+  it("hides a missed task from an assignee who has already given their reason", () => {
+    const mine = task({
+      dueAt: "2026-09-20T05:00:00Z",
+      completions: [completion(A, "missed", "Sick")],
+    });
+    expect(getTodayTaskBuckets([mine], A, NOW).missed).toEqual([]);
+    expect(getTodayTaskBuckets([mine], B, NOW).missed).toHaveLength(1);
+  });
+
+  it("lists an unassigned missed task rather than hiding it at once", () => {
+    const unassigned = task({
+      id: "u",
+      dueAt: "2026-09-20T05:00:00Z",
+      assignedEmployeeIds: [],
+    });
+    expect(ids(getTodayTaskBuckets([unassigned], VIEWER, NOW).missed)).toEqual(["u"]);
+  });
+
+  it("sorts each bucket by due time, soonest first", () => {
+    const later = task({ id: "later", dueAt: "2026-09-20T18:00:00Z" });
+    const sooner = task({ id: "sooner", dueAt: "2026-09-20T10:00:00Z" });
+    expect(ids(getTodayTaskBuckets([later, sooner], VIEWER, NOW).upcoming)).toEqual([
+      "sooner",
+      "later",
+    ]);
+  });
+});
+
+describe("isCompletedTaskPastItsDay", () => {
+  function completedAt(recordedAt: string) {
+    return { completions: [{ ...completion("user_1", "completed"), recordedAt }] };
+  }
+  const at = (iso: string) => Date.parse(iso);
+
+  it("keeps the task through 23:59:59 Riyadh on the day it was completed", () => {
+    const task = completedAt("2026-09-20T07:00:00Z");
+    expect(isCompletedTaskPastItsDay(task, at("2026-09-20T20:59:59Z"))).toBe(false);
+  });
+
+  it("hides it at Riyadh midnight", () => {
+    const task = completedAt("2026-09-20T07:00:00Z");
+    expect(isCompletedTaskPastItsDay(task, at("2026-09-20T21:00:00Z"))).toBe(true);
+  });
+
+  it("hides a task completed at 23:59:59 Riyadh one second later", () => {
+    const task = completedAt("2026-09-20T20:59:59Z");
+    expect(isCompletedTaskPastItsDay(task, at("2026-09-20T21:00:00Z"))).toBe(true);
+  });
+
+  it("hides a task completed several days ago", () => {
+    const task = completedAt("2026-09-15T07:00:00Z");
+    expect(isCompletedTaskPastItsDay(task, at("2026-09-20T07:00:00Z"))).toBe(true);
+  });
+
+  it("is false for a task that is not completed", () => {
+    const now = at("2026-09-30T00:00:00Z");
+    expect(isCompletedTaskPastItsDay({ completions: [] }, now)).toBe(false);
+  });
+
+  it("is false for a task with only a missed-reason response", () => {
+    const missed = { ...completion("user_1", "missed", "late"), recordedAt: "2026-09-15T07:00:00Z" };
+    expect(isCompletedTaskPastItsDay({ completions: [missed] }, at("2026-09-30T00:00:00Z"))).toBe(false);
+  });
+
+  it("is false when recordedAt cannot be parsed", () => {
+    expect(isCompletedTaskPastItsDay(completedAt("not-a-date"), at("2026-09-30T00:00:00Z"))).toBe(false);
   });
 });

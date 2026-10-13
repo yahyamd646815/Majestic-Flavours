@@ -36,6 +36,8 @@ import {
   TASK_DATE_FILTER_LABELS,
   dueAtRiyadhIsoDate,
   hasEmployeeResponded,
+  isCompletedTaskPastItsDay,
+  isMissedTaskHiddenForViewer,
   isTaskFullyCompleted,
   isTaskOverdueForEmployee,
   matchesTaskDateFilter,
@@ -92,6 +94,7 @@ export default function Tasks() {
   const addAssignment = useTaskStore((state) => state.addAssignment);
   const removeAssignment = useTaskStore((state) => state.removeAssignment);
   const completeTask = useTaskStore((state) => state.completeTask);
+  const delayTask = useTaskStore((state) => state.delayTask);
   const deleteTask = useTaskStore((state) => state.deleteTask);
   const addRecurrenceRule = useTaskRecurrenceStore((state) => state.addRule);
 
@@ -152,9 +155,30 @@ export default function Tasks() {
   // so the "Today" option rolls over at Riyadh midnight without a reload.
   const todayIsoDate = getRiyadhIsoDate(nowMs);
 
+  // Tasks this person no longer needs to see. Missed: past the 48-hour window,
+  // or already answered (by them, or — for someone not assigned — by every
+  // assignee). Completed (Admin/Manager only — employees' lists already drop
+  // completed tasks below): past the Riyadh day it was completed. Hiding is
+  // display-only; the tasks stay in the store and in Records. Keyed by id so the list filter and the bulk-selection below agree
+  // on exactly the same set.
+  const hiddenTaskIds = useMemo(() => {
+    const hidden = new Set<string>();
+    if (!currentUserClerkId) return hidden;
+    for (const task of tasks) {
+      if (
+        isMissedTaskHiddenForViewer(task, currentUserClerkId, nowMs) ||
+        (canManage && isCompletedTaskPastItsDay(task, nowMs))
+      ) {
+        hidden.add(task.id);
+      }
+    }
+    return hidden;
+  }, [tasks, currentUserClerkId, canManage, nowMs]);
+
   const filteredTasks = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return tasks.filter((task) => {
+      if (hiddenTaskIds.has(task.id)) return false;
       const matchesCategory =
         selectedCategoryIds.size === 0 || selectedCategoryIds.has(task.categoryId);
       const matchesQuery = query.length === 0 || task.title.toLowerCase().includes(query);
@@ -170,7 +194,15 @@ export default function Tasks() {
       );
       return matchesCategory && matchesQuery && matchesEmployee && matchesDue;
     });
-  }, [tasks, selectedCategoryIds, searchQuery, selectedEmployeeIds, dateFilter, todayIsoDate]);
+  }, [
+    tasks,
+    hiddenTaskIds,
+    selectedCategoryIds,
+    searchQuery,
+    selectedEmployeeIds,
+    dateFilter,
+    todayIsoDate,
+  ]);
 
   // An employee's list drops a task once someone completed it (closed for
   // everyone) or once they themselves have responded — someone else's miss
@@ -204,7 +236,15 @@ export default function Tasks() {
     return [...overdue.sort(compare), ...notOverdue.sort(compare)];
   }, [visibleTasks, sortMode, canManage, currentUserClerkId, nowMs]);
 
-  const selectedCount = selectedTaskIds.size;
+  // `selectedTaskIds` survives filter changes on purpose, but a task that has
+  // since dropped off the page as missed must not stay selected or be acted on
+  // by a bulk action. Derived rather than pruned from state so it can never
+  // lag behind the clock by a render.
+  const selectedActionableIds = useMemo(
+    () => [...selectedTaskIds].filter((taskId) => !hiddenTaskIds.has(taskId)),
+    [selectedTaskIds, hiddenTaskIds],
+  );
+  const selectedCount = selectedActionableIds.length;
   const allVisibleSelected =
     sortedTasks.length > 0 && sortedTasks.every((task) => selectedTaskIds.has(task.id));
 
@@ -240,7 +280,7 @@ export default function Tasks() {
     if (isAssigning) return;
     setIsAssigning(true);
     try {
-      const targetIds = [...selectedTaskIds];
+      const targetIds = selectedActionableIds;
 
       // `addAssignment` upserts with ignoreDuplicates, so tasks this person is
       // already on need no client-side short-circuit.
@@ -267,7 +307,7 @@ export default function Tasks() {
     if (isAssigning) return;
     setIsAssigning(true);
     try {
-      const targetIds = [...selectedTaskIds];
+      const targetIds = selectedActionableIds;
 
       // A delete that matches no row is a no-op rather than an error, so
       // tasks this person was never on are left untouched.
@@ -417,6 +457,13 @@ export default function Tasks() {
         "The task update was not saved. Check your connection and try again.",
       );
     }
+  }
+
+  // Reached only after TaskCard's own confirmation. The store has already
+  // logged the real error; the message here is the friendly version of it.
+  async function handleDelay(taskId: string) {
+    const result = await delayTask(supabase, taskId);
+    if (!result.ok) Alert.alert("Could not delay task", result.message);
   }
 
   async function handleAddReminder(
@@ -682,6 +729,7 @@ export default function Tasks() {
                     void handleRemoveAssignment(item.id, employeeClerkId)
                   }
                   onComplete={(status, note) => void handleComplete(item.id, status, note)}
+                  onDelay={() => handleDelay(item.id)}
                   onEdit={() => openEditTaskForm(item.id)}
                   canDelete={canDeleteTask(item)}
                   onDelete={() => setDeleteTarget(item)}
