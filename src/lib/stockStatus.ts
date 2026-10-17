@@ -55,6 +55,13 @@ export const STOCK_STATUS_BADGE_CLASSES: Record<
   },
 };
 
+/** The tappable look of a status option in the Dashboard's status picker. */
+export const STOCK_STATUS_PICKER_OPTION_CLASSES: Record<StockStatus, string> = {
+  out_of_stock: "status-picker__option status-picker__option--out-of-stock",
+  low_stock: "status-picker__option status-picker__option--low-stock",
+  in_stock: "status-picker__option status-picker__option--in-stock",
+};
+
 /** The selected look for a status-ping button. Unselected buttons share
  * `STOCK_STATUS_PING_INACTIVE_CLASSES` regardless of which status they are. */
 export const STOCK_STATUS_PING_CLASSES: Record<

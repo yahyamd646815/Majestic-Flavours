@@ -4,6 +4,7 @@ import { Redirect } from "expo-router";
 import { usePostHog } from "posthog-react-native";
 import { useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
+import Animated, { LinearTransition } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { CategoryFilter } from "@/components/CategoryFilter";
@@ -11,13 +12,15 @@ import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { ErrorState } from "@/components/ErrorState";
 import { LoadingState } from "@/components/LoadingState";
 import { StockStatusBadge } from "@/components/StockStatusBadge";
-import { colors } from "@/constants/theme";
+import { StockStatusPicker } from "@/components/StockStatusPicker";
+import { colors, radii, spacing } from "@/constants/theme";
 import { ONE_MINUTE_MS, useNowTick } from "@/hooks/useNowTick";
+import { useStockStatusChange } from "@/hooks/useStockStatusChange";
 import { formatElapsedSince } from "@/lib/elapsedTime";
 import { getAssignedNames } from "@/lib/getAssignedNames";
 import { getCategoryName, getUnitLabel } from "@/lib/inventoryLabels";
 import { formatDueDateTime, formatSnapshotTime, getRiyadhIsoDate } from "@/lib/reports";
-import { getEffectiveStatus } from "@/lib/stockStatus";
+import { getEffectiveStatus, type StockStatus } from "@/lib/stockStatus";
 import { useSupabaseClient } from "@/lib/supabase";
 import { dueAtRiyadhIsoDate, getTodayTaskBuckets } from "@/lib/tasks";
 import type { SyncedUser } from "@/store/appUsersStore";
@@ -52,6 +55,20 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 32,
   },
+  // The `card` utility, restated: this card is an Animated.View (its height
+  // animates when the status picker opens), and animated styles go through
+  // StyleSheet rather than className.
+  alertCard: {
+    gap: spacing.sm,
+    borderRadius: radii.md,
+    backgroundColor: colors.white,
+    padding: spacing.md,
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
 });
 
 export default function Dashboard() {
@@ -75,6 +92,37 @@ export default function Dashboard() {
 
   const posthog = usePostHog();
   const hasCapturedLowStockView = useRef(false);
+
+  // Which item's status picker is open — one value for the whole screen, so
+  // opening one closes any other and a tap elsewhere can close it.
+  const [openPickerItemId, setOpenPickerItemId] = useState<string | null>(null);
+  // Set by a touch that lands on any picker; read (and cleared) by the screen's
+  // own touch handler, which runs right after it as the touch bubbles up.
+  const touchedPickerRef = useRef(false);
+  const { isChanging, changeStatus } = useStockStatusChange();
+  const canChangeStatus = role === "admin" || role === "manager";
+
+  function closePicker() {
+    if (!isChanging) setOpenPickerItemId(null);
+  }
+
+  function handleScreenTouchStart() {
+    if (touchedPickerRef.current) {
+      touchedPickerRef.current = false;
+      return;
+    }
+    closePicker();
+  }
+
+  function togglePicker(itemId: string) {
+    if (isChanging) return;
+    setOpenPickerItemId((current) => (current === itemId ? null : itemId));
+  }
+
+  async function selectStatus(itemId: string, status: StockStatus) {
+    await changeStatus(itemId, status);
+    setOpenPickerItemId(null);
+  }
 
   // Drives the elapsed-time timers on the alert cards. A minute is as fine as
   // the DD:HH:MM display can show, so there is nothing to gain from ticking
@@ -155,7 +203,10 @@ export default function Dashboard() {
   const isEmptyAndLoading = (isLoading || unitsLoading) && items.length === 0;
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.white }}>
+    <SafeAreaView
+      style={{ flex: 1, backgroundColor: colors.white }}
+      onTouchStart={handleScreenTouchStart}
+    >
       <View className="px-4 pt-4">
         <Text className="font-inter-bold text-2xl text-maroon">Hello, {displayName}</Text>
         <Text className="mt-1 font-inter text-sm text-text-secondary">{today}</Text>
@@ -182,7 +233,7 @@ export default function Dashboard() {
             />
           </View>
 
-          <ScrollView contentContainerStyle={styles.scrollContent}>
+          <ScrollView contentContainerStyle={styles.scrollContent} onScrollBeginDrag={closePicker}>
             <View className="gap-6 px-4 pt-6">
               <View className="flex-row gap-3">
                 <View className="card flex-1 items-center gap-1">
@@ -229,6 +280,14 @@ export default function Dashboard() {
                           units={units}
                           appUsers={appUsers}
                           nowMs={nowMs}
+                          canChangeStatus={canChangeStatus}
+                          isPickerOpen={openPickerItemId === item.id}
+                          isBusy={isChanging}
+                          onTogglePicker={() => togglePicker(item.id)}
+                          onSelectStatus={(status) => void selectStatus(item.id, status)}
+                          onPickerTouchStart={() => {
+                            touchedPickerRef.current = true;
+                          }}
                         />
                       ))
                     )}
@@ -248,6 +307,14 @@ export default function Dashboard() {
                           units={units}
                           appUsers={appUsers}
                           nowMs={nowMs}
+                          canChangeStatus={canChangeStatus}
+                          isPickerOpen={openPickerItemId === item.id}
+                          isBusy={isChanging}
+                          onTogglePicker={() => togglePicker(item.id)}
+                          onSelectStatus={(status) => void selectStatus(item.id, status)}
+                          onPickerTouchStart={() => {
+                            touchedPickerRef.current = true;
+                          }}
                         />
                       ))
                     )}
@@ -353,14 +420,33 @@ type AlertItemCardProps = {
   /** Ticked once a minute by the screen, so every card's timer advances
    * together instead of each one owning its own interval. */
   nowMs: number;
+  /** Admin and Manager only — everyone else sees a plain badge. */
+  canChangeStatus: boolean;
+  isPickerOpen: boolean;
+  isBusy: boolean;
+  onTogglePicker: () => void;
+  onSelectStatus: (status: StockStatus) => void;
+  onPickerTouchStart: () => void;
 };
 
-function AlertItemCard({ item, categories, units, appUsers, nowMs }: AlertItemCardProps) {
+function AlertItemCard({
+  item,
+  categories,
+  units,
+  appUsers,
+  nowMs,
+  canChangeStatus,
+  isPickerOpen,
+  isBusy,
+  onTogglePicker,
+  onSelectStatus,
+  onPickerTouchStart,
+}: AlertItemCardProps) {
   const status = getEffectiveStatus(item);
   const assignedNames = getAssignedNames(item.assignedEmployeeIds, appUsers);
 
   return (
-    <View className="card gap-2">
+    <Animated.View layout={LinearTransition.duration(180)} style={styles.alertCard}>
       <View className="flex-row items-start justify-between gap-2">
         <View className="flex-1">
           <Text className="font-inter-semibold text-base text-text-primary">{item.name}</Text>
@@ -368,7 +454,19 @@ function AlertItemCard({ item, categories, units, appUsers, nowMs }: AlertItemCa
             {getCategoryName(categories, item.categoryId)}
           </Text>
         </View>
-        <StockStatusBadge status={status} isOverridden={item.statusOverride !== null} />
+        {canChangeStatus ? (
+          <StockStatusPicker
+            status={status}
+            isOverridden={item.statusOverride !== null}
+            isOpen={isPickerOpen}
+            isBusy={isBusy}
+            onToggle={onTogglePicker}
+            onSelect={onSelectStatus}
+            onTouchStart={onPickerTouchStart}
+          />
+        ) : (
+          <StockStatusBadge status={status} isOverridden={item.statusOverride !== null} />
+        )}
       </View>
 
       <Text className="font-inter text-sm text-text-primary">
@@ -391,6 +489,6 @@ function AlertItemCard({ item, categories, units, appUsers, nowMs }: AlertItemCa
           since status change (DD:HH:MM)
         </Text>
       </View>
-    </View>
+    </Animated.View>
   );
 }
