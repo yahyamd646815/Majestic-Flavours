@@ -101,6 +101,25 @@
   @apply font-inter-semibold text-xs text-out-of-stock;
 }
 
+/* Dashboard status picker options. Min height keeps the touch target large
+   even though the label is small; the label itself reuses the
+   status-badge__text-- classes. */
+@utility status-picker__option {
+  @apply min-h-11 min-w-32 items-center justify-center rounded-full border px-4;
+}
+
+@utility status-picker__option--in-stock {
+  @apply border-in-stock/40 bg-in-stock/10;
+}
+
+@utility status-picker__option--low-stock {
+  @apply border-low-stock/40 bg-low-stock/10;
+}
+
+@utility status-picker__option--out-of-stock {
+  @apply border-out-of-stock/40 bg-out-of-stock/10;
+}
+
 /* Status-ping buttons (report entry). The base deliberately sets no border
    colour or background — each modifier owns both — so a selected button never
    depends on utility ordering to beat the unselected look. */
